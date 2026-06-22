@@ -11,7 +11,8 @@ SRC_DIR = src
 
 # Yeni modüler yapı dosyaları
 LIB_SOURCES = $(SRC_DIR)/lib/string.c $(SRC_DIR)/lib/io.c $(SRC_DIR)/lib/memory.c \
-              $(SRC_DIR)/lib/sha256.c $(SRC_DIR)/lib/fs.c $(SRC_DIR)/lib/shell.c
+              $(SRC_DIR)/lib/sha256.c $(SRC_DIR)/lib/fs.c $(SRC_DIR)/lib/shell.c \
+              $(SRC_DIR)/lib/python.c $(SRC_DIR)/lib/keyboard.c
 KERNEL_SOURCES = $(SRC_DIR)/kernel/main.c
 BOOT_SOURCES = $(BOOT_DIR)/boot.asm $(BOOT_DIR)/kernel_entry.asm
 
@@ -20,11 +21,12 @@ BOOT_SOURCES = $(BOOT_DIR)/boot.asm $(BOOT_DIR)/kernel_entry.asm
 OBJ = $(BOOT_DIR)/kernel_entry.o font.o \
       $(SRC_DIR)/lib/string.o $(SRC_DIR)/lib/io.o $(SRC_DIR)/lib/memory.o \
       $(SRC_DIR)/lib/sha256.o $(SRC_DIR)/lib/fs.o $(SRC_DIR)/lib/shell.o \
+      $(SRC_DIR)/lib/python.o $(SRC_DIR)/lib/keyboard.o \
       $(SRC_DIR)/kernel/main.o
 
 # Bayraklar
 CFLAGS = -ffreestanding -Os -Wall -Wextra -fno-stack-protector -m32 -ffunction-sections -fdata-sections
-LDFLAGS = -Ttext 0x1000 --oformat binary --gc-sections
+LDFLAGS = -Ttext 0x10000 --oformat binary --gc-sections
 
 all: os-image.bin run
 
@@ -35,8 +37,12 @@ os-image.bin: boot.bin kernel.bin
 kernel.bin: $(BOOT_DIR)/kernel_entry.o font.o \
            $(SRC_DIR)/lib/video.o $(SRC_DIR)/kernel/main.o \
            $(SRC_DIR)/lib/string.o $(SRC_DIR)/lib/io.o $(SRC_DIR)/lib/memory.o \
-           $(SRC_DIR)/lib/sha256.o $(SRC_DIR)/lib/fs.o $(SRC_DIR)/lib/shell.o
+           $(SRC_DIR)/lib/sha256.o $(SRC_DIR)/lib/fs.o $(SRC_DIR)/lib/shell.o \
+           $(SRC_DIR)/lib/python.o $(SRC_DIR)/lib/keyboard.o
+
 	$(LD) -o $@ $(LDFLAGS) $^
+
+
 
 # Eski kernel derleme
 $(KERNEL_DIR)/kernel.o: $(KERNEL_DIR)/kernel.c
@@ -73,6 +79,12 @@ $(SRC_DIR)/lib/fs.o: $(SRC_DIR)/lib/fs.c $(SRC_DIR)/include/fs.h $(SRC_DIR)/incl
 
 $(SRC_DIR)/lib/shell.o: $(SRC_DIR)/lib/shell.c $(SRC_DIR)/include/shell.h $(SRC_DIR)/include/sha256.h \
                        $(SRC_DIR)/include/string.h $(SRC_DIR)/include/io.h $(SRC_DIR)/include/memory.h $(SRC_DIR)/include/fs.h $(SRC_DIR)/include/types.h
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(SRC_DIR)/lib/python.o: $(SRC_DIR)/lib/python.c $(SRC_DIR)/include/python.h $(SRC_DIR)/include/video.h $(SRC_DIR)/include/keyboard.h $(SRC_DIR)/include/string.h $(SRC_DIR)/include/types.h
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(SRC_DIR)/lib/keyboard.o: $(SRC_DIR)/lib/keyboard.c $(SRC_DIR)/include/keyboard.h $(SRC_DIR)/include/io.h $(SRC_DIR)/include/types.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Bootloader

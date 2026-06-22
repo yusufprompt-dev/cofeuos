@@ -13,59 +13,20 @@
 shell_control g_shell;
 fs_control_block g_fs;
 memory_arena g_mem_arena;
-int cursor_x = 5;
-int cursor_y = 30;
 
-static u8 shift_pressed = 0;
-
-static const char key_normal[59] = {
-    0, 27, '1','2','3','4','5','6','7','8','9','0','-','=', '\b',
-    9, 'q','w','e','r','t','y','u','i','o','p','[',']',10,
-    0,'a','s','d','f','g','h','j','k','l',';','\'', '`', 0,
-    '\\','z','x','c','v','b','n','m',',','.','/', 0,42,0,' '
-};
-
-static const char key_shift[59] = {
-    0, 27, '!','@','#','$','%','^','&','*','(',')','_','+','\b',
-    9, 'Q','W','E','R','T','Y','U','I','O','P','{','}',10,
-    0,'A','S','D','F','G','H','J','K','L',':','"','~', 0,
-    '|','Z','X','C','V','B','N','M','<','>','?', 0,42,0,' '
-};
-
-static char read_key(void) {
-    while (1) {
-        if (inb(0x64) & 1) {
-            u8 sc = inb(0x60);
-            if (sc == 0x2A || sc == 0x36) {
-                shift_pressed = 1;
-                continue;
-            }
-            if (sc == 0xAA || sc == 0xB6) {
-                shift_pressed = 0;
-                continue;
-            }
-            if (sc == 0x0E) {
-                return '\b';
-            }
-            if (sc < 59 && !(sc & 0x80)) {
-                char c = shift_pressed ? key_shift[sc] : key_normal[sc];
-                if (c) return c;
-            }
-        }
-    }
-}
+#include "../include/keyboard.h"
 
 static void next_line(void) {
-    cursor_x = 5;
+    cursor_x = splits[active_split].x + 5;
     cursor_y += LINE_HEIGHT;
-    if (cursor_y > SCREEN_HEIGHT - LINE_HEIGHT) {
-        video_scroll();
-        cursor_y = SCREEN_HEIGHT - LINE_HEIGHT;
+    if (cursor_y > splits[active_split].y + splits[active_split].h - LINE_HEIGHT) {
+        video_scroll_rect(splits[active_split].x, splits[active_split].y, splits[active_split].w, splits[active_split].h);
+        cursor_y = splits[active_split].y + splits[active_split].h - LINE_HEIGHT;
     }
 }
 
 static void erase_at(int x, int y) {
-    if (x >= 0 && y >= 0) {
+    if (x >= splits[active_split].x && y >= splits[active_split].y) {
         video_clear_rect(x, y, font_width, font_height);
     }
 }
@@ -132,29 +93,70 @@ static void show_login(void) {
 }
 
 int main_get_input(char* buffer, int max_len) {
-    int pos = 0;
+    int pos = splits[active_split].cmd_pos;
 
     while (1) {
         char ch = read_key();
+        
+        if (ch == 16) { // Ctrl+P
+            splits[active_split].cmd_pos = pos;
+            if (num_splits == 1) {
+                splits[0].h = SCREEN_HEIGHT / 2;
+                splits[1].x = 0;
+                splits[1].y = SCREEN_HEIGHT / 2;
+                splits[1].w = SCREEN_WIDTH;
+                splits[1].h = SCREEN_HEIGHT / 2;
+                splits[1].cx = 5;
+                splits[1].cy = splits[1].y + 5;
+                splits[1].active = 0;
+                splits[1].cmd_pos = 0;
+                splits[1].cmd_buf[0] = '\0';
+                splits[1].needs_prompt = 1;
+                num_splits = 2;
+                
+                video_fill_rect(0, splits[1].y - 2, SCREEN_WIDTH, 2, 8);
+                active_split = 1;
+            } else {
+                active_split = (active_split + 1) % 2;
+            }
+            return -2;
+        }
+        
+        if (ch == 24) { // Ctrl+X
+            if (num_splits == 2) {
+                num_splits = 1;
+                active_split = 0;
+                splits[0].h = SCREEN_HEIGHT;
+                video_clear(0);
+                splits[0].cx = 5;
+                splits[0].cy = 5;
+                splits[0].cmd_pos = 0;
+                splits[0].cmd_buf[0] = '\0';
+                splits[0].needs_prompt = 1;
+                return -2;
+            }
+        }
+
         if (ch == '\n') {
             buffer[pos] = '\0';
+            splits[active_split].cmd_pos = 0;
             next_line();
             return pos;
         }
         if (ch == '\b') {
             if (pos > 0) {
                 pos--;
-                if (cursor_x > 5) {
+                if (cursor_x > splits[active_split].x + 5) {
                     cursor_x -= font_width;
                 } else {
-                    cursor_x = 5;
+                    cursor_x = splits[active_split].x + 5;
                 }
                 erase_at(cursor_x, cursor_y);
             }
             continue;
         }
         if (ch >= ' ' && pos < max_len - 1) {
-            if (cursor_x >= SCREEN_WIDTH - font_width) {
+            if (cursor_x >= splits[active_split].x + splits[active_split].w - font_width) {
                 next_line();
             }
             buffer[pos++] = ch;
@@ -165,7 +167,7 @@ int main_get_input(char* buffer, int max_len) {
 }
 
 static void print_shell_prompt(void) {
-    int x = 5;
+    int x = splits[active_split].x + 5;
     video_print(g_shell.user, x, cursor_y, 10);
     x += video_text_width(g_shell.user);
 
@@ -192,16 +194,29 @@ static void print_shell_prompt(void) {
     cursor_x = x;
 }
 
-void kernel_main(void) {
-    video_init();
+void kernel_main(vbe_mode_info_t* vbe_info) {
+    video_init(vbe_info);
     video_clear(0);
-
-    video_print("cofeuOS v3.0 - Boot", 5, 5, 14);
-    video_print("====================", 5, 5 + font_height + 2, 7);
 
     void* mem_base = (void*)0x100000;
     mem_init(&g_mem_arena, mem_base, 16 * 1024 * 1024);
     fs_init(&g_fs);
+
+    splits[0].x = 0;
+    splits[0].y = 0;
+    splits[0].w = SCREEN_WIDTH;
+    splits[0].h = SCREEN_HEIGHT;
+    splits[0].cx = 5;
+    splits[0].cy = 5;
+    splits[0].active = 1;
+    splits[0].needs_prompt = 1;
+    splits[0].cmd_pos = 0;
+    splits[0].cmd_buf[0] = '\0';
+    num_splits = 1;
+    active_split = 0;
+
+    video_print("cofeuOS v3.0 - Boot", 5, 5, 14);
+    video_print("====================", 5, 5 + font_height + 2, 7);
 
     strcpy(g_shell.host, "cofeu");
     strcpy(g_shell.partition, "/dev/sda1");
@@ -212,13 +227,20 @@ void kernel_main(void) {
 
     show_login();
 
-    char cmd[512];
     while (1) {
-        next_line();
-        print_shell_prompt();
-        int len = main_get_input(cmd, sizeof(cmd));
-        if (len > 0) {
-            shell_execute(cmd);
+        if (splits[active_split].needs_prompt) {
+            next_line();
+            print_shell_prompt();
+            splits[active_split].needs_prompt = 0;
         }
+        int len = main_get_input(splits[active_split].cmd_buf, sizeof(splits[0].cmd_buf));
+        if (len == -2) {
+            continue;
+        }
+        if (len > 0) {
+            shell_execute(splits[active_split].cmd_buf);
+        }
+        splits[active_split].cmd_pos = 0;
+        splits[active_split].needs_prompt = 1;
     }
 }

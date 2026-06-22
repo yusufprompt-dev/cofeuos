@@ -8,8 +8,7 @@
 #include "../include/string.h"
 #include "../include/memory.h"
 
-/* Dosya sistemi kontrol bloğu */
-static fs_control_block g_fs;
+/* Not: g_fs main.c'de tanımlıdır */
 
 /* Dosya sistemi başlat */
 int fs_init(fs_control_block* fs) {
@@ -133,7 +132,9 @@ int fs_read_file(fs_control_block* fs, const char* path, char* buffer, size_t si
     /* Dosya var mı kontrol et */
     for (size_t i = 0; i < fs->file_count; i++) {
         if (fs->files[i].active && strcmp(fs->files[i].path, resolved) == 0) {
-            size_t copy_size = (size > fs->files[i].size) ? fs->files[i].size : size;
+            /* size-1: null terminator için yer bırak (buffer overflow önlemi) */
+            size_t max_read = (size > 0) ? size - 1 : 0;
+            size_t copy_size = (max_read < fs->files[i].size) ? max_read : fs->files[i].size;
             memcpy(buffer, fs->files[i].content, copy_size);
             buffer[copy_size] = '\0';
             return (int)copy_size;

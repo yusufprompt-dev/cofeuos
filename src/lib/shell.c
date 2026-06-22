@@ -8,10 +8,16 @@
 #include "../include/string.h"
 #include "../include/io.h"
 #include "../include/types.h"
+#include "../include/games.h"
+#include "../include/python.h"
+#include "../include/keyboard.h"
 
-extern int cursor_x, cursor_y;
 extern shell_control g_shell;
 extern fs_control_block g_fs;
+
+shell_split_t splits[MAX_SPLITS];
+int active_split = 0;
+int num_splits = 1;
 
 int main_get_input(char* buffer, int max_len);
 
@@ -48,6 +54,14 @@ static int cmd_env(int argc, char** argv);
 static int cmd_rodo(int argc, char** argv);
 static int cmd_sudo(int argc, char** argv);
 static int cmd_pacman(int argc, char** argv);
+static int cmd_apps(int argc, char** argv);
+static int cmd_about(int argc, char** argv);
+static int cmd_sysinfo(int argc, char** argv);
+static int cmd_calc(int argc, char** argv);
+static int cmd_write(int argc, char** argv);
+static int cmd_desktop(int argc, char** argv);
+static int cmd_theme(int argc, char** argv);
+static int cmd_split(int argc, char** argv);
 
 int shell_execute(const char* cmd);
 
@@ -57,23 +71,23 @@ static void shell_print(const char* str, u8 color) {
 
     for (const char* p = str; *p; p++) {
         if (*p == '\n') {
-            x = 5;
+            x = splits[active_split].x + 5;
             y += LINE_HEIGHT;
-            if (y > SCREEN_HEIGHT - LINE_HEIGHT) {
-                video_scroll();
-                y = SCREEN_HEIGHT - LINE_HEIGHT;
+            if (y > splits[active_split].y + splits[active_split].h - LINE_HEIGHT) {
+                video_scroll_rect(splits[active_split].x, splits[active_split].y, splits[active_split].w, splits[active_split].h);
+                y = splits[active_split].y + splits[active_split].h - LINE_HEIGHT;
             }
             continue;
         }
 
         video_draw_char(*p, x, y, color);
         x += CHAR_WIDTH;
-        if (x > SCREEN_WIDTH - CHAR_WIDTH) {
-            x = 5;
+        if (x > splits[active_split].x + splits[active_split].w - CHAR_WIDTH) {
+            x = splits[active_split].x + 5;
             y += LINE_HEIGHT;
-            if (y > SCREEN_HEIGHT - CHAR_HEIGHT) {
-                video_scroll();
-                y = SCREEN_HEIGHT - CHAR_HEIGHT;
+            if (y > splits[active_split].y + splits[active_split].h - CHAR_HEIGHT) {
+                video_scroll_rect(splits[active_split].x, splits[active_split].y, splits[active_split].w, splits[active_split].h);
+                y = splits[active_split].y + splits[active_split].h - CHAR_HEIGHT;
             }
         }
     }
@@ -83,16 +97,16 @@ static void shell_print(const char* str, u8 color) {
 }
 
 static void shell_newline(void) {
-    cursor_x = 5;
+    cursor_x = splits[active_split].x + 5;
     cursor_y += LINE_HEIGHT;
-    if (cursor_y > SCREEN_HEIGHT - LINE_HEIGHT) {
-        video_scroll();
-        cursor_y = SCREEN_HEIGHT - LINE_HEIGHT;
+    if (cursor_y > splits[active_split].y + splits[active_split].h - LINE_HEIGHT) {
+        video_scroll_rect(splits[active_split].x, splits[active_split].y, splits[active_split].w, splits[active_split].h);
+        cursor_y = splits[active_split].y + splits[active_split].h - LINE_HEIGHT;
     }
 }
 
 static int shell_tokenize(const char* cmd, char** args, int max_args) {
-    char buf[512];
+    static char buf[512];
     strcpy(buf, cmd);
     int i = 0;
     char* token = strtok(buf, " \t\n");
@@ -138,6 +152,18 @@ int shell_execute(const char* cmd) {
     if (strcmp(args[0], "df") == 0) return cmd_df(argc, args);
     if (strcmp(args[0], "echo") == 0) return cmd_echo(argc, args);
     if (strcmp(args[0], "env") == 0) return cmd_env(argc, args);
+    if (strcmp(args[0], "apps") == 0) return cmd_apps(argc, args);
+    if (strcmp(args[0], "about") == 0) return cmd_about(argc, args);
+    if (strcmp(args[0], "sysinfo") == 0) return cmd_sysinfo(argc, args);
+    if (strcmp(args[0], "calc") == 0) return cmd_calc(argc, args);
+    if (strcmp(args[0], "write") == 0) return cmd_write(argc, args);
+    if (strcmp(args[0], "desktop") == 0) return cmd_desktop(argc, args);
+    if (strcmp(args[0], "startx") == 0) return cmd_desktop(argc, args);
+    if (strcmp(args[0], "theme") == 0) return cmd_theme(argc, args);
+    if (strcmp(args[0], "split") == 0) return cmd_split(argc, args);
+    if (strcmp(args[0], "python") == 0) { python_repl(); return 0; }
+    if (strcmp(args[0], "python3") == 0) { python_repl(); return 0; }
+ 
     
     shell_print("cofeuOS: '", 12);
     shell_print(args[0], 12);
@@ -147,17 +173,22 @@ int shell_execute(const char* cmd) {
 }
 
 static int cmd_help(int argc, char** argv) {
-    shell_print("cofeuOS Unix Shell Commands:\n", 14);
+    shell_print("cofeuOS Unix Shell Komutlari:\n", 14);
     shell_newline();
-    shell_print("File: ls cat pwd cd touch mkdir rm rmdir\n", 15);
+    shell_print("Dosya: ls cat pwd cd touch mkdir rm rmdir\n", 15);
     shell_newline();
-    shell_print("System: whoami uname clear date uptime free ps df echo env\n", 15);
+    shell_print("Dosya: write nano vim\n", 15);
     shell_newline();
-    shell_print("Other: neofetch nano vim rodo reboot halt\n", 15);
+    shell_print("Sistem: whoami uname clear date uptime free ps df echo env sysinfo\n", 15);
     shell_newline();
-    shell_print("Package: pacman\n", 15);
+    shell_print("Diger: neofetch calc apps about theme desktop startx rodo reboot halt\n", 15);
     shell_newline();
-    shell_print("Network: ifconfig ping\n", 15);
+    shell_print("Paket: pacman\n", 15);
+    shell_newline();
+    shell_print("Ag: ifconfig ping\n", 15);
+    shell_newline();
+    shell_newline();
+    shell_print("Python: python / python3\n", 11);
     shell_newline();
     return 0;
 }
@@ -232,24 +263,74 @@ static int cmd_uname(int argc, char** argv) {
 }
 
 static int cmd_clear(int argc, char** argv) {
-    video_clear(0);
-    cursor_x = 5;
-    cursor_y = 30;
+    video_clear_rect(splits[active_split].x, splits[active_split].y, splits[active_split].w, splits[active_split].h);
+    cursor_x = splits[active_split].x + 5;
+    cursor_y = splits[active_split].y + 5;
+    return 0;
+}
+
+static int cmd_split(int argc, char** argv) {
+    (void)argc; (void)argv;
+    shell_print("Press Ctrl+P to split screen, and Ctrl+X to close the active split.", 14);
+    shell_newline();
     return 0;
 }
 
 static int cmd_neofetch(int argc, char** argv) {
-    shell_print("    .-\"-.     ", 15); shell_newline();
-    shell_print("   / ..  \\    ", 15); shell_print("OS: cofeuOS v3.0", 11); shell_newline();
-    shell_print("  | (  )  |   ", 15); shell_print("Kernel: x86_32", 11); shell_newline();
-    shell_print("   \\ ..  /    ", 15); shell_print("Shell: Cofeu Shell", 11); shell_newline();
-    shell_print("    `---'      ", 15); shell_print("Host: cofeu", 11); shell_newline();
-    shell_print("Resolution: 320x200", 11); shell_newline();
-    shell_print("Disk: /dev/sda1", 11); shell_newline();
-    shell_print("Memory: 16MB", 11); shell_newline();
-    shell_print("Uptime: 0 days", 11); shell_newline();
-    shell_print("Network: no NIC driver installed", 12); shell_newline();
-    shell_print("Note: Ethernet stack requires kernel driver support.", 12); shell_newline();
+    (void)argc; (void)argv;
+    
+    // Ensure 9 lines fit without scrolling during animation
+    while (cursor_y + 9 * LINE_HEIGHT > splits[active_split].y + splits[active_split].h) {
+        video_scroll_rect(splits[active_split].x, splits[active_split].y, splits[active_split].w, splits[active_split].h);
+        cursor_y -= LINE_HEIGHT;
+    }
+    
+    int frame = 0;
+    int start_y = cursor_y;
+    int start_x = cursor_x;
+    
+    while (1) {
+        cursor_y = start_y;
+        cursor_x = start_x;
+        
+        const char* smoke_f1[3] = {
+            "    )  (      ",
+            "   (   ) )    ",
+            "    ) ( (     "
+        };
+        const char* smoke_f2[3] = {
+            "   (    )     ",
+            "    )  ( (    ",
+            "   (   ) )    "
+        };
+        const char* smoke_f3[3] = {
+            "  (      )    ",
+            "   )    (     ",
+            "  (    ) )    "
+        };
+        
+        const char** smoke = smoke_f1;
+        if (frame % 3 == 1) smoke = smoke_f2;
+        if (frame % 3 == 2) smoke = smoke_f3;
+        
+        shell_print(smoke[0], 14); shell_print(g_shell.user, 12); shell_print("@", 15); shell_print("cofeu", 14); shell_newline();
+        shell_print(smoke[1], 14); shell_print("----------", 8); shell_newline();
+        shell_print(smoke[2], 14); shell_print("OS: ", 11); shell_print("cofeuOS v3.0", 15); shell_newline();
+        shell_print("  _______)_   ", 15); shell_print("Kernel: ", 11); shell_print("x86_32 i686", 15); shell_newline();
+        shell_print(".-'---------| ", 15); shell_print("Shell: ", 11); shell_print("Cofeu Shell", 15); shell_newline();
+        shell_print("( C|/\\/\\/\\/\\| ", 15); shell_print("Resolution: ", 11); shell_print("320x200", 15); shell_newline();
+        shell_print(" '-./\\/\\/\\/\\| ", 15); shell_print("Memory: ", 11); shell_print("16MB", 15); shell_newline();
+        shell_print("   '________' ", 15); shell_print("Disk: ", 11); shell_print("/dev/sda1", 15); shell_newline();
+        shell_print("    '-------' ", 15); shell_print("Uptime: ", 11); shell_print("0 days", 15); shell_newline();
+        
+        for (volatile int i=0; i<3000000; i++) {} // simple delay
+        frame++;
+        
+        if (try_read_key()) {
+            break;
+        }
+    }
+    
     return 0;
 }
 
@@ -530,11 +611,299 @@ static int cmd_nano(int argc, char** argv) {
     return cmd_text_editor(argc, argv, "nano");
 }
 
+static int shell_atoi(const char* s) {
+    int sign = 1;
+    int value = 0;
+
+    if (*s == '-') {
+        sign = -1;
+        s++;
+    }
+
+    while (*s >= '0' && *s <= '9') {
+        value = value * 10 + (*s - '0');
+        s++;
+    }
+
+    return value * sign;
+}
+
+static void shell_print_int(int value, u8 color) {
+    char buf[16];
+    int pos = 0;
+
+    if (value == 0) {
+        shell_print("0", color);
+        return;
+    }
+
+    if (value < 0) {
+        shell_print("-", color);
+        value = -value;
+    }
+
+    while (value > 0 && pos < (int)sizeof(buf)) {
+        buf[pos++] = '0' + (value % 10);
+        value /= 10;
+    }
+
+    while (pos > 0) {
+        char out[2] = { buf[--pos], '\0' };
+        shell_print(out, color);
+    }
+}
+
+static void shell_join_args(char** argv, int start, int argc, char* out, int out_size) {
+    int pos = 0;
+    for (int i = start; i < argc; i++) {
+        int len = strlen(argv[i]);
+        if (pos + len + 2 >= out_size) {
+            break;
+        }
+        strcpy(&out[pos], argv[i]);
+        pos += len;
+        if (i < argc - 1) {
+            out[pos++] = ' ';
+        }
+    }
+    out[pos] = '\0';
+}
+
+static void desktop_text(const char* str, int x, int y, u8 color) {
+    video_print(str, x, y, color);
+}
+
+static void desktop_draw_window(int x, int y, int w, int h, const char* title, u8 body_color) {
+    video_fill_rect(x, y, w, h, body_color);
+    video_fill_rect(x, y, w, 14, 1);
+    video_draw_rect(x, y, w, h, 15);
+    desktop_text(title, x + 5, y + 3, 15);
+    video_fill_rect(x + w - 13, y + 3, 8, 8, 12);
+}
+
+static void desktop_draw_base(const char* status) {
+    video_clear(1);
+    video_fill_rect(0, 0, SCREEN_WIDTH, 18, 9);
+    video_fill_rect(0, SCREEN_HEIGHT - 20, SCREEN_WIDTH, 20, 8);
+    desktop_text("cofeuDE", 6, 5, 15);
+    desktop_text("Desktop", SCREEN_WIDTH - 70, 5, 15);
+
+    video_fill_rect(10, 28, 34, 34, 3);
+    video_draw_rect(10, 28, 34, 34, 15);
+    desktop_text("Files", 8, 66, 15);
+
+    video_fill_rect(58, 28, 34, 34, 5);
+    video_draw_rect(58, 28, 34, 34, 15);
+    desktop_text("Notes", 55, 66, 15);
+
+    video_fill_rect(106, 28, 34, 34, 6);
+    video_draw_rect(106, 28, 34, 34, 15);
+    desktop_text("Info", 108, 66, 15);
+
+    desktop_draw_window(152, 34, SCREEN_WIDTH - 164, SCREEN_HEIGHT - 74, "Welcome", 7);
+    desktop_text("apps: files notes info term exit", 160, 54, 0);
+    desktop_text("type a desktop command below", 160, 68, 0);
+
+    desktop_text(status, 6, SCREEN_HEIGHT - 15, 15);
+}
+
+static void desktop_show_files(void) {
+    char buf[512];
+    int sz = fs_list_dir(&g_fs, g_shell.cwd, buf, sizeof(buf));
+
+    desktop_draw_base("Files app");
+    desktop_draw_window(48, 82, SCREEN_WIDTH - 96, 72, "Files", 7);
+    desktop_text("Path:", 56, 104, 0);
+    desktop_text(g_shell.cwd, 94, 104, 1);
+    desktop_text(sz >= 0 && buf[0] ? buf : "(empty)", 56, 120, 0);
+}
+
+static void desktop_show_notes(void) {
+    char note[256];
+    int sz = fs_read_file(&g_fs, "/home/notes.txt", note, sizeof(note) - 1);
+
+    desktop_draw_base("Notes app");
+    desktop_draw_window(38, 82, SCREEN_WIDTH - 76, 76, "Notes", 7);
+    if (sz >= 0) {
+        note[sz] = '\0';
+        desktop_text(note, 46, 104, 0);
+    } else {
+        desktop_text("No notes yet. Use: write /home/notes.txt hello", 46, 104, 0);
+    }
+}
+
+static void desktop_show_info(void) {
+    desktop_draw_base("System info");
+    desktop_draw_window(48, 82, SCREEN_WIDTH - 96, 84, "System", 7);
+    desktop_text("cofeuOS v3.0", 58, 104, 0);
+    desktop_text("Kernel: x86 protected mode", 58, 118, 0);
+    desktop_text("Video: VESA framebuffer", 58, 132, 0);
+    desktop_text("Shell: cofeu shell + cofeuDE", 58, 146, 0);
+}
+
+static int cmd_apps(int argc, char** argv) {
+    shell_print("Installed apps:\n", 14);
+    shell_newline();
+    shell_print("desktop/startx  graphical desktop session\n", 15);
+    shell_newline();
+    shell_print("files           built into desktop\n", 15);
+    shell_newline();
+    shell_print("notes           built into desktop, reads /home/notes.txt\n", 15);
+    shell_newline();
+    shell_print("calc write nano vim sysinfo neofetch pacman\n", 15);
+    shell_newline();
+    return 0;
+}
+
+static int cmd_about(int argc, char** argv) {
+    shell_print("cofeuOS v3.0\n", 14);
+    shell_newline();
+    shell_print("A tiny protected-mode x86 OS with VESA graphics, shell, RAM fs and cofeuDE.", 15);
+    shell_newline();
+    return 0;
+}
+
+static int cmd_sysinfo(int argc, char** argv) {
+    shell_print("System information:\n", 14);
+    shell_newline();
+    shell_print("OS: cofeuOS v3.0", 11);
+    shell_newline();
+    shell_print("Kernel: i386 protected mode", 11);
+    shell_newline();
+    shell_print("Video: VESA framebuffer ", 11);
+    shell_print_int(SCREEN_WIDTH, 11);
+    shell_print("x", 11);
+    shell_print_int(SCREEN_HEIGHT, 11);
+    shell_print("x", 11);
+    shell_print_int(screen_bpp, 11);
+    shell_newline();
+    shell_print("Memory arena: 16MB", 11);
+    shell_newline();
+    shell_print("Filesystem: in-memory cofeuFS", 11);
+    shell_newline();
+    return 0;
+}
+
+static int cmd_calc(int argc, char** argv) {
+    if (argc < 4) {
+        shell_print("usage: calc <a> +|-|*|/ <b>", 12);
+        shell_newline();
+        return -1;
+    }
+
+    int a = shell_atoi(argv[1]);
+    int b = shell_atoi(argv[3]);
+    int result = 0;
+
+    if (strcmp(argv[2], "+") == 0) result = a + b;
+    else if (strcmp(argv[2], "-") == 0) result = a - b;
+    else if (strcmp(argv[2], "*") == 0) result = a * b;
+    else if (strcmp(argv[2], "/") == 0) {
+        if (b == 0) {
+            shell_print("calc: division by zero", 12);
+            shell_newline();
+            return -1;
+        }
+        result = a / b;
+    } else {
+        shell_print("calc: unknown operator", 12);
+        shell_newline();
+        return -1;
+    }
+
+    shell_print_int(result, 10);
+    shell_newline();
+    return 0;
+}
+
+static int cmd_write(int argc, char** argv) {
+    if (argc < 3) {
+        shell_print("usage: write <file> <text...>", 12);
+        shell_newline();
+        return -1;
+    }
+
+    char path[MAX_PATH_LEN];
+    char text[512];
+    fs_resolve_path(g_shell.cwd, argv[1], path);
+    shell_join_args(argv, 2, argc, text, sizeof(text));
+    fs_write_file(&g_fs, path, text, strlen(text));
+    shell_print("wrote ", 10);
+    shell_print(argv[1], 10);
+    shell_newline();
+    return 0;
+}
+
+static int cmd_theme(int argc, char** argv) {
+    video_clear(0);
+    video_fill_rect(0, 0, SCREEN_WIDTH, 16, 9);
+    video_fill_rect(0, 16, SCREEN_WIDTH, 16, 3);
+    video_fill_rect(0, 32, SCREEN_WIDTH, 16, 5);
+    cursor_x = 5;
+    cursor_y = 56;
+    shell_print("Theme preview applied. Use clear to return to terminal background.", 14);
+    shell_newline();
+    return 0;
+}
+
+static int cmd_desktop(int argc, char** argv) {
+    char input[64];
+
+    fs_create_dir(&g_fs, "/home");
+    if (!fs_file_exists(&g_fs, "/home/notes.txt")) {
+        fs_create_file(&g_fs, "/home/notes.txt", "Welcome to cofeuDE.", 19);
+    }
+
+    desktop_draw_base("Ready");
+
+    while (1) {
+        cursor_x = 8;
+        cursor_y = SCREEN_HEIGHT - 15;
+        video_fill_rect(0, SCREEN_HEIGHT - 20, SCREEN_WIDTH, 20, 8);
+        desktop_text("desktop> ", 6, SCREEN_HEIGHT - 15, 15);
+        cursor_x = 78;
+        main_get_input(input, sizeof(input));
+
+        if (strcmp(input, "exit") == 0 || strcmp(input, "term") == 0 || strcmp(input, "shell") == 0) {
+            video_clear(0);
+            cursor_x = 5;
+            cursor_y = 30;
+            shell_print("Exited cofeuDE.", 10);
+            shell_newline();
+            return 0;
+        }
+        if (strcmp(input, "files") == 0) {
+            desktop_show_files();
+            continue;
+        }
+        if (strcmp(input, "notes") == 0) {
+            desktop_show_notes();
+            continue;
+        }
+        if (strcmp(input, "info") == 0 || strcmp(input, "about") == 0) {
+            desktop_show_info();
+            continue;
+        }
+        if (strcmp(input, "clear") == 0 || strcmp(input, "home") == 0) {
+            desktop_draw_base("Ready");
+            continue;
+        }
+
+        desktop_draw_base("Unknown app. Try files, notes, info, term, exit.");
+    }
+}
+
 static int cmd_date(int argc, char** argv) { shell_print("Thu Jan 1 00:00:00 2025", 14); shell_newline(); return 0; }
 static int cmd_uptime(int argc, char** argv) { shell_print("uptime 0 days", 14); shell_newline(); return 0; }
 static int cmd_free(int argc, char** argv) { shell_print("free: 16MB total", 14); shell_newline(); return 0; }
-static int cmd_ps(int argc, char** argv) { shell_print("PID 1 shell", 15); shell_newline(); return 0; }
+static int cmd_ps(int argc, char** argv) { shell_print("PID 1 shell\nPID 2 cofeuDE-ready", 15); shell_newline(); return 0; }
 static int cmd_df(int argc, char** argv) { shell_print("/dev/sda1 16MB 6% used", 15); shell_newline(); return 0; }
-static int cmd_echo(int argc, char** argv) { for (int i = 1; i < argc; i++) shell_print(argv[i], 15); shell_newline(); return 0; }
-static int cmd_env(int argc, char** argv) { shell_print("USER=root PATH=/bin", 15); shell_newline(); return 0; }
-
+static int cmd_echo(int argc, char** argv) {
+    for (int i = 1; i < argc; i++) {
+        shell_print(argv[i], 15);
+        if (i < argc - 1) shell_print(" ", 15);
+    }
+    shell_newline();
+    return 0;
+}
+static int cmd_env(int argc, char** argv) { shell_print("USER=", 15); shell_print(g_shell.user, 15); shell_print(" HOST=cofeu PATH=/bin SHELL=/bin/cofeush", 15); shell_newline(); return 0; }
