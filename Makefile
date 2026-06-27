@@ -1,148 +1,126 @@
-# Araçlar
-CC = i686-elf-gcc
-LD = i686-elf-ld
-AS = nasm
-OBJCOPY = objcopy
+# ─── Araçlar ───────────────────────────────────────────
+CC      = clang
+LD      = lld-link
+OBJCOPY = llvm-objcopy
+AS      = nasm
 
-# Dosya Yolları
+# ─── gnu-efi yolları ───────────────────────────────────
+EFI_INC = /usr/include/efi
+
+# ─── Dosya Yolları ─────────────────────────────────────
 BOOT_DIR = boot
-KERNEL_DIR = kernel
-SRC_DIR = src
+SRC_DIR  = src
 
-# Yeni modüler yapı dosyaları
-LIB_SOURCES = $(SRC_DIR)/lib/string.c $(SRC_DIR)/lib/io.c $(SRC_DIR)/lib/memory.c \
-              $(SRC_DIR)/lib/sha256.c $(SRC_DIR)/lib/fs.c $(SRC_DIR)/lib/shell.c \
-              $(SRC_DIR)/lib/python.c $(SRC_DIR)/lib/keyboard.c
-KERNEL_SOURCES = $(SRC_DIR)/kernel/main.c
-BOOT_SOURCES = $(BOOT_DIR)/boot.asm $(BOOT_DIR)/kernel_entry.asm
+# ─── EFI Derleme Bayrakları ────────────────────────────
+CFLAGS_EFI = -target x86_64-unknown-windows \
+             -ffreestanding -fno-stack-protector -fno-stack-check \
+             -fshort-wchar -mno-red-zone \
+             -Wall -Wextra \
+             -I$(EFI_INC) -I$(EFI_INC)/x86_64 \
+             -DEFI_FUNCTION_WRAPPER
 
-# Çıktı Dosyaları
-# kernel_entry.o'nun EN BAŞTA olması hayati önem taşır!
-OBJ = $(BOOT_DIR)/kernel_entry.o font.o \
-      $(SRC_DIR)/lib/string.o $(SRC_DIR)/lib/io.o $(SRC_DIR)/lib/memory.o \
-      $(SRC_DIR)/lib/sha256.o $(SRC_DIR)/lib/fs.o $(SRC_DIR)/lib/shell.o \
-      $(SRC_DIR)/lib/python.o $(SRC_DIR)/lib/keyboard.o \
-      $(SRC_DIR)/kernel/main.o
+# ─── Kernel Derleme Bayrakları ─────────────────────────
+CFLAGS_K = -target x86_64-unknown-windows \
+           -ffreestanding -Os \
+           -fno-stack-protector -fno-stack-check \
+           -fshort-wchar -mno-red-zone \
+           -Wall -Wextra \
+           -ffunction-sections -fdata-sections \
+           -I$(EFI_INC) -I$(EFI_INC)/x86_64 \
+           -DEFI_FUNCTION_WRAPPER
 
-# Bayraklar
-CFLAGS = -ffreestanding -Os -Wall -Wextra -fno-stack-protector -m32 -ffunction-sections -fdata-sections
-LDFLAGS = -Ttext 0x10000 --oformat binary --gc-sections
+# ─── Linker Bayrakları ─────────────────────────────────
+LDFLAGS = -subsystem:efi_application \
+          -entry:efi_main \
+          -dll \
+          --gc-sections
 
-all: os-image.bin run
+# ─── Objeler ───────────────────────────────────────────
+OBJS = $(BOOT_DIR)/efi_main.o \
+       $(SRC_DIR)/kernel/main.o \
+       $(SRC_DIR)/lib/video.o \
+       $(SRC_DIR)/lib/string.o \
+       $(SRC_DIR)/lib/io.o \
+       $(SRC_DIR)/lib/memory.o \
+       $(SRC_DIR)/lib/sha256.o \
+       $(SRC_DIR)/lib/fs.o \
+       $(SRC_DIR)/lib/shell.o \
+       $(SRC_DIR)/lib/python.o \
+       $(SRC_DIR)/lib/keyboard.o \
+       font.o
 
-os-image.bin: boot.bin kernel.bin
-	cat $^ > $@
-	truncate -s 1M $@
+# ─── Hedefler ──────────────────────────────────────────
+chkstk.o: chkstk.c
+	$(CC) $(CFLAGS_K) -c chkstk.c -o chkstk.o
 
-kernel.bin: $(BOOT_DIR)/kernel_entry.o font.o \
-           $(SRC_DIR)/lib/video.o $(SRC_DIR)/kernel/main.o \
-           $(SRC_DIR)/lib/string.o $(SRC_DIR)/lib/io.o $(SRC_DIR)/lib/memory.o \
-           $(SRC_DIR)/lib/sha256.o $(SRC_DIR)/lib/fs.o $(SRC_DIR)/lib/shell.o \
-           $(SRC_DIR)/lib/python.o $(SRC_DIR)/lib/keyboard.o
+all: BOOTX64.EFI
 
-	$(LD) -o $@ $(LDFLAGS) $^
+BOOTX64.EFI: $(OBJS)
+	$(LD) $(LDFLAGS) $(OBJS) chkstk.o -out:$@
+	@echo ">>> BOOTX64.EFI hazir!"
 
+# ─── EFI Entry ─────────────────────────────────────────
+$(BOOT_DIR)/efi_main.o: $(BOOT_DIR)/efi_main.c
+	$(CC) $(CFLAGS_EFI) -c $< -o $@
 
+# ─── Kernel ────────────────────────────────────────────
+$(SRC_DIR)/kernel/main.o: $(SRC_DIR)/kernel/main.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
 
-# Eski kernel derleme
-$(KERNEL_DIR)/kernel.o: $(KERNEL_DIR)/kernel.c
-	$(CC) $(CFLAGS) -c $< -o $@
+# ─── Lib ───────────────────────────────────────────────
+$(SRC_DIR)/lib/video.o: $(SRC_DIR)/lib/video.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
 
-# Yeni modüler kernel derleme
-$(SRC_DIR)/kernel/main.o: $(SRC_DIR)/kernel/main.c $(SRC_DIR)/include/types.h \
-                         $(SRC_DIR)/include/string.h $(SRC_DIR)/include/io.h \
-                         $(SRC_DIR)/include/memory.h $(SRC_DIR)/include/shell.h \
-                         $(SRC_DIR)/include/terminus_font.h $(SRC_DIR)/include/video.h
-	$(CC) $(CFLAGS) -c $< -o $@
+$(SRC_DIR)/lib/string.o: $(SRC_DIR)/lib/string.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
 
-# Video library
-$(SRC_DIR)/lib/video.o: $(SRC_DIR)/lib/video.c $(SRC_DIR)/include/video.h \
-                       $(SRC_DIR)/include/types.h $(SRC_DIR)/include/io.h \
-                       $(SRC_DIR)/include/terminus_font.h
-	$(CC) $(CFLAGS) -c $< -o $@
+$(SRC_DIR)/lib/io.o: $(SRC_DIR)/lib/io.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
 
-# Kütüphane modülleri
-$(SRC_DIR)/lib/string.o: $(SRC_DIR)/lib/string.c $(SRC_DIR)/include/string.h $(SRC_DIR)/include/types.h
-	$(CC) $(CFLAGS) -c $< -o $@
+$(SRC_DIR)/lib/memory.o: $(SRC_DIR)/lib/memory.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
 
-$(SRC_DIR)/lib/io.o: $(SRC_DIR)/lib/io.c $(SRC_DIR)/include/io.h $(SRC_DIR)/include/types.h
-	$(CC) $(CFLAGS) -c $< -o $@
+$(SRC_DIR)/lib/sha256.o: $(SRC_DIR)/lib/sha256.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
 
-$(SRC_DIR)/lib/memory.o: $(SRC_DIR)/lib/memory.c $(SRC_DIR)/include/memory.h $(SRC_DIR)/include/string.h $(SRC_DIR)/include/types.h
-	$(CC) $(CFLAGS) -c $< -o $@
+$(SRC_DIR)/lib/fs.o: $(SRC_DIR)/lib/fs.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
 
-$(SRC_DIR)/lib/sha256.o: $(SRC_DIR)/lib/sha256.c $(SRC_DIR)/include/sha256.h $(SRC_DIR)/include/string.h $(SRC_DIR)/include/types.h
-	$(CC) $(CFLAGS) -c $< -o $@
+$(SRC_DIR)/lib/shell.o: $(SRC_DIR)/lib/shell.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
 
-$(SRC_DIR)/lib/fs.o: $(SRC_DIR)/lib/fs.c $(SRC_DIR)/include/fs.h $(SRC_DIR)/include/string.h $(SRC_DIR)/include/memory.h $(SRC_DIR)/include/types.h
-	$(CC) $(CFLAGS) -c $< -o $@
+$(SRC_DIR)/lib/python.o: $(SRC_DIR)/lib/python.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
 
-$(SRC_DIR)/lib/shell.o: $(SRC_DIR)/lib/shell.c $(SRC_DIR)/include/shell.h $(SRC_DIR)/include/sha256.h \
-                       $(SRC_DIR)/include/string.h $(SRC_DIR)/include/io.h $(SRC_DIR)/include/memory.h $(SRC_DIR)/include/fs.h $(SRC_DIR)/include/types.h
-	$(CC) $(CFLAGS) -c $< -o $@
+$(SRC_DIR)/lib/keyboard.o: $(SRC_DIR)/lib/keyboard.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
 
-$(SRC_DIR)/lib/python.o: $(SRC_DIR)/lib/python.c $(SRC_DIR)/include/python.h $(SRC_DIR)/include/video.h $(SRC_DIR)/include/keyboard.h $(SRC_DIR)/include/string.h $(SRC_DIR)/include/types.h
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(SRC_DIR)/lib/keyboard.o: $(SRC_DIR)/lib/keyboard.c $(SRC_DIR)/include/keyboard.h $(SRC_DIR)/include/io.h $(SRC_DIR)/include/types.h
-	$(CC) $(CFLAGS) -c $< -o $@
-
-# Bootloader
-boot.bin: $(BOOT_DIR)/boot.asm
-	$(AS) -f bin $< -o $@
-
-$(BOOT_DIR)/kernel_entry.o: $(BOOT_DIR)/kernel_entry.asm
-	$(AS) -f elf32 $< -o $@
-
+# ─── Font ──────────────────────────────────────────────
 font.psf: gohufont.h
-	python3 - <<'PY'
-	import re
-	from pathlib import Path
-	src = Path('gohufont.h').read_text()
-	vals = [int(v, 16) for v in re.findall(r'0x[0-9a-fA-F]+', src)]
-	if len(vals) < 32:
-	    raise SystemExit('font source too small')
-	length = vals[4]
-	charsize = vals[5]
-	total = 32 + length * charsize
-	Path('font.psf').write_bytes(bytearray(vals[:total]))
-	PY
+	python3 gen_font.py
 
-font.o: font.psf
-	$(OBJCOPY) -I binary -O elf32-i386 -B i386 $< $@ \
-	--redefine-sym _binary_font_psf_start=font_psf
+font.o: font_data.c
+	$(CC) $(CFLAGS_K) -c font_data.c -o font.o
 
-# Çalıştırma seçenekleri
-run: os-image.bin
-	qemu-system-i386 -drive format=raw,file=$<
+# ─── QEMU ile Test ─────────────────────────────────────
+run: uefi-disk.img
+	qemu-system-x86_64 \
+	  -bios /usr/share/edk2/x64/OVMF.4m.fd \
+	  -drive format=raw,file=$< \
+	  -m 256M
 
-run-new: os-image.bin
-	qemu-system-i386 -drive format=raw,file=$< -boot c
+uefi-disk.img: BOOTX64.EFI
+	dd if=/dev/zero of=$@ bs=1M count=64
+	mkfs.fat -F 32 $@
+	mkdir -p /tmp/cofeu_mnt
+	sudo mount -o loop $@ /tmp/cofeu_mnt
+	sudo mkdir -p /tmp/cofeu_mnt/EFI/BOOT
+	sudo cp BOOTX64.EFI /tmp/cofeu_mnt/EFI/BOOT/
+	sudo umount /tmp/cofeu_mnt
 
-run-debug: os-image.bin
-	qemu-system-i386 -drive format=raw,file=$< -s -S & gdb
-
-# Temizleme
+# ─── Temizlik ──────────────────────────────────────────
 clean:
-	rm -rf *.bin $(BOOT_DIR)/*.o $(KERNEL_DIR)/*.o $(SRC_DIR)/lib/*.o $(SRC_DIR)/kernel/*.o os-image.bin font.o
-
-# Yeni yapı için temizleme
-clean-new:
-	rm -rf *.bin $(SRC_DIR)/lib/*.o $(SRC_DIR)/kernel/*.o os-image.bin font.o
-
-# Sadece eski yapıyı temizle
-clean-old:
-	rm -rf *.bin $(BOOT_DIR)/*.o $(KERNEL_DIR)/*.o os-image.bin font.o
-
-# Derleme kontrolü
-check:
-	@echo "=== Derleme Kontrolü ==="
-	@echo "CC: $(CC)"
-	@echo "LD: $(LD)"
-	@echo "AS: $(AS)"
-	@echo "CFLAGS: $(CFLAGS)"
-	@echo "LDFLAGS: $(LDFLAGS)"
-	@echo "=== Dosya Kontrolü ==="
-	@ls -la $(BOOT_SOURCES) 2>/dev/null || echo "Boot dosyaları eksik"
-	@ls -la $(KERNEL_SOURCES) 2>/dev/null || echo "Kernel dosyaları eksik"
-	@ls -la $(LIB_SOURCES) 2>/dev/null || echo "Kütüphane dosyaları eksik"
+	rm -rf *.efi *.EFI *.so *.img *.psf font.o \
+	       $(BOOT_DIR)/*.o \
+	       $(SRC_DIR)/lib/*.o \
+	       $(SRC_DIR)/kernel/*.o

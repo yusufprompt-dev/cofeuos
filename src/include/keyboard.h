@@ -6,12 +6,11 @@
 
 #include "types.h"
 
-/* Okuma fonksiyonları */
-char read_key(void);        /* Bloklar, karakter döndürür */
-char try_read_key(void);    /* Bloklamaz, 0 döndürür eğer tuş yoksa */
-void kbd_delay(u32 count);  /* Basit busy-loop gecikme */
+char read_key(void);
+char try_read_key(void);
+void kbd_delay(u32 count);
+void keyboard_init(void *st);
 
-/* Shift durumu (extern erişim için) */
 extern u8 kbd_shift;
 
-#endif /* _KEYBOARD_H */
+#endif
