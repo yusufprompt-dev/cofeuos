@@ -34,9 +34,9 @@ yay -S gnu-efi
 ### Derleme
 
 ```bash
-make  # eğer chkstk.o yoksa
-python3 gen_font.py
-make BOOTX64.EFI
+make  # eğer chkstk.o yoksa [EĞER CHKSTK.O YOKSA HATA VERIR]
+python3 gen_font.py # fontu olusturma
+make BOOTX64.EFI # Uefi için .efi dosyası olusturma
 ```
 
 ### QEMU ile Test
@@ -92,4 +92,4 @@ Bilgisayarı USB'den boot et.
 
 ## Lisans
 
-MIT
+GNU GPL v3
