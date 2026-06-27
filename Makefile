@@ -55,8 +55,8 @@ chkstk.o: chkstk.c
 
 all: BOOTX64.EFI
 
-BOOTX64.EFI: $(OBJS)
-	$(LD) $(LDFLAGS) $(OBJS) chkstk.o -out:$@
+BOOTX64.EFI: $(OBJS) $(MP_OBJS) src/uefi_stdlib.o
+	$(LD) $(LDFLAGS) $(OBJS) $(MP_OBJS) src/uefi_stdlib.o font.o chkstk.o -out:$@
 	@echo ">>> BOOTX64.EFI hazir!"
 
 # ─── EFI Entry ─────────────────────────────────────────
@@ -124,3 +124,14 @@ clean:
 	       $(BOOT_DIR)/*.o \
 	       $(SRC_DIR)/lib/*.o \
 	       $(SRC_DIR)/kernel/*.o
+
+# MicroPython
+MP_DIR = src/micropython_embed
+MP_SRCS = $(shell find $(MP_DIR) -name "*.c")
+MP_OBJS = $(MP_SRCS:.c=.o)
+
+$(MP_DIR)/%.o: $(MP_DIR)/%.c
+	$(CC) $(CFLAGS_K) -I$(MP_DIR) -I$(MP_DIR)/port -I$(MP_DIR)/genhdr -c $< -o $@
+
+src/uefi_stdlib.o: src/uefi_stdlib.c
+	$(CC) $(CFLAGS_K) -c $< -o $@

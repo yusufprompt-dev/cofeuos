@@ -17,7 +17,6 @@ typedef signed short        s16;
 typedef signed int          s32;
 typedef signed long long    s64;
 typedef __SIZE_TYPE__ size_t;
-typedef int                 ssize_t;
 
 /* Boolean tipi */
 #ifndef __bool_true_false_are_defined
