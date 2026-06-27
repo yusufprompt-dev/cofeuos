@@ -34,6 +34,7 @@ yay -S gnu-efi
 ### Derleme
 
 ```bash
+make  # eğer chkstk.o yoksa
 python3 gen_font.py
 make BOOTX64.EFI
 ```
