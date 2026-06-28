@@ -1,5 +1,4 @@
 #include <alloca.h>
-#include <alloca.h>
 /*
  * This file is part of the MicroPython project, http://micropython.org/
  *

@@ -24,3 +24,4 @@
 #define ERANGE  34
 #define ENOSYS  38
 static int errno = 0;
+#define EWOULDBLOCK 11

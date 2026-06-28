@@ -16,3 +16,5 @@
 #define MICROPY_PY_SYS                          (0)
 #undef MICROPY_FLOAT_IMPL
 #define MICROPY_FLOAT_IMPL (MICROPY_FLOAT_IMPL_NONE)
+#define MICROPY_PY_BUILTINS_INPUT (1)
+#define mp_hal_readline mp_hal_readline

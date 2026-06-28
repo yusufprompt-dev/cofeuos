@@ -159,8 +159,7 @@ int shell_execute(const char* cmd) {
     if (strcmp(args[0], "desktop") == 0) return cmd_desktop(argc, args);
     if (strcmp(args[0], "startx") == 0) return cmd_desktop(argc, args);
     if (strcmp(args[0], "theme") == 0) return cmd_theme(argc, args);
-    if (strcmp(args[0], "python") == 0) { python_repl(); return 0; }
-    if (strcmp(args[0], "python3") == 0) { python_repl(); return 0; }
+    if (strcmp(args[0], "python") == 0 || strcmp(args[0], "python3") == 0) { if (argc > 1) { python_run_file(args[1]); } else { python_repl(); } return 0; }
  
  
     

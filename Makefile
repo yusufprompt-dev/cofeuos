@@ -33,7 +33,7 @@ CFLAGS_K = -target x86_64-unknown-windows \
 LDFLAGS = -subsystem:efi_application \
           -entry:efi_main \
           -dll \
-          --gc-sections
+          
 
 # ─── Objeler ───────────────────────────────────────────
 OBJS = $(BOOT_DIR)/efi_main.o \
@@ -131,7 +131,7 @@ MP_SRCS = $(shell find $(MP_DIR) -name "*.c")
 MP_OBJS = $(MP_SRCS:.c=.o)
 
 $(MP_DIR)/%.o: $(MP_DIR)/%.c
-	$(CC) $(CFLAGS_K) -I$(MP_DIR) -I$(MP_DIR)/port -I$(MP_DIR)/genhdr -c $< -o $@
+	$(CC) $(CFLAGS_K) -DMICROPY_PY_BUILTINS_INPUT=1 -I$(MP_DIR) -I$(MP_DIR)/port -I$(MP_DIR)/genhdr -c $< -o $@
 
 src/uefi_stdlib.o: src/uefi_stdlib.c
 	$(CC) $(CFLAGS_K) -c $< -o $@
