@@ -37,6 +37,7 @@ yay -S gnu-efi
 make  # eğer chkstk.o yoksa [EĞER CHKSTK.O YOKSA HATA VERIR]
 python3 gen_font.py # fontu olusturma
 make BOOTX64.EFI # Uefi için .efi dosyası olusturma
+make $(find src/micropython_embed -name "*.c" | sed 's/\.c$/.o/') 2>&1 | grep "error:" | head -10 # MicroPython derlemesi hatayi gosterir
 ```
 
 ### QEMU ile Test
