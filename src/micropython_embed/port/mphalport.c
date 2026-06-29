@@ -3,6 +3,10 @@
 #include "../../include/video.h"
 #include "../../include/shell.h"
 #include "py/mphal.h"
+#include "py/runtime.h"
+#include "py/mperrno.h"
+#include "py/lexer.h"
+#include "py/builtin.h"
 #include "shared/readline/readline.h"
 
 void mp_hal_stdout_tx_strn_cooked(const char *str, size_t len) {
@@ -41,10 +45,29 @@ int mp_hal_readline(vstr_t *line, const char *prompt) {
                 mp_hal_stdout_tx_strn_cooked("\b \b", 3);
             }
         } else if (ch == 3) {
-            return 3; /* CHAR_CTRL_C */
+            return 3;
         } else if (ch >= 32) {
             vstr_add_byte(line, ch);
             mp_hal_stdout_tx_strn_cooked(&ch, 1);
         }
     }
 }
+
+/* Dosya sistemi stub'ları */
+mp_lexer_t *mp_lexer_new_from_file(qstr filename) {
+    (void)filename;
+    mp_raise_OSError(MP_ENOENT);
+    return NULL;
+}
+
+mp_import_stat_t mp_import_stat(const char *path) {
+    (void)path;
+    return MP_IMPORT_STAT_NO_EXIST;
+}
+
+mp_obj_t mp_builtin_open(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs) {
+    (void)n_args; (void)args; (void)kwargs;
+    mp_raise_OSError(MP_ENOENT);
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_KW(mp_builtin_open_obj, 1, mp_builtin_open);

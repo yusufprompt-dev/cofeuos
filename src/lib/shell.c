@@ -160,34 +160,23 @@ int shell_execute(const char* cmd) {
     if (strcmp(args[0], "startx") == 0) return cmd_desktop(argc, args);
     if (strcmp(args[0], "theme") == 0) return cmd_theme(argc, args);
     if (strcmp(args[0], "python") == 0 || strcmp(args[0], "python3") == 0) { if (argc > 1) { python_run_file(args[1]); } else { python_repl(); } return 0; }
- 
- 
-    
+
     shell_print("cofeuOS: '", 12);
     shell_print(args[0], 12);
     shell_print("': unknown command", 12);
-    
+
     return -1;
 }
 
 static int cmd_help(int argc, char** argv) {
     shell_print("cofeuOS Unix Shell Komutlari:\n", 14);
-    
     shell_print("Dosya: ls cat pwd cd touch mkdir rm rmdir\n", 15);
-    
     shell_print("Dosya: write nano vim\n", 15);
-    
     shell_print("Sistem: whoami uname clear date uptime free ps df echo env sysinfo\n", 15);
-    
     shell_print("Diger: neofetch calc apps about theme desktop startx rodo reboot halt\n", 15);
-    
     shell_print("Paket: pacman\n", 15);
-    
     shell_print("Ag: ifconfig ping\n", 15);
-    
-    
     shell_print("Python: python / python3\n", 11);
-    
     return 0;
 }
 
@@ -195,7 +184,6 @@ static int cmd_ls(int argc, char** argv) {
     const char* p = argc > 1 ? argv[1] : g_shell.cwd;
     int found = 0;
 
-    // Dizinleri listele
     for (size_t i = 0; i < g_fs.dir_count; i++) {
         if (g_fs.dirs[i].active) {
             char parent[MAX_PATH_LEN];
@@ -213,7 +201,6 @@ static int cmd_ls(int argc, char** argv) {
         }
     }
 
-    // Dosyaları listele
     for (size_t i = 0; i < g_fs.file_count; i++) {
         if (g_fs.files[i].active) {
             char parent[MAX_PATH_LEN];
@@ -232,118 +219,71 @@ static int cmd_ls(int argc, char** argv) {
     }
     return 0;
 }
+
 static int cmd_cat(int argc, char** argv) {
-    if (argc < 2) {
-        shell_print("cat: missing file", 12);
-        
-        return -1;
-    }
+    if (argc < 2) { shell_print("cat: missing file", 12); return -1; }
     char res[256], buf[4096];
     fs_resolve_path(g_shell.cwd, argv[1], res);
     int sz = fs_read_file(&g_fs, res, buf, 4096);
     if (sz < 0) {
-        shell_print("cat: ", 12);
-        shell_print(argv[1], 12);
-        shell_print(": no such file", 12);
-        
+        shell_print("cat: ", 12); shell_print(argv[1], 12); shell_print(": no such file", 12);
         return -1;
     }
     buf[sz] = 0;
     shell_print(buf, 15);
-    
     return 0;
 }
 
-static int cmd_pwd(int argc, char** argv) {
-    shell_print(g_shell.cwd, 11);
-    
-    return 0;
-}
+static int cmd_pwd(int argc, char** argv) { shell_print(g_shell.cwd, 11); return 0; }
 
 static int cmd_cd(int argc, char** argv) {
     const char* p = argc > 1 ? argv[1] : "/";
     char res[256];
     fs_resolve_path(g_shell.cwd, p, res);
     if (!fs_dir_exists(&g_fs, res)) {
-        shell_print("cd: no such directory: ", 12);
-        shell_print(p, 12);
-        
-        return -1;
+        shell_print("cd: no such directory: ", 12); shell_print(p, 12); return -1;
     }
     strcpy(g_shell.cwd, res);
     return 0;
 }
 
-static int cmd_whoami(int argc, char** argv) {
-    shell_print(g_shell.user, 10);
-    
-    return 0;
-}
-
-static int cmd_uname(int argc, char** argv) {
-    shell_print("cofeuOS v3.0 x86_32", 14);
-    
-    return 0;
-}
+static int cmd_whoami(int argc, char** argv) { shell_print(g_shell.user, 10); return 0; }
+static int cmd_uname(int argc, char** argv) { shell_print("cofeuOS v3.0 x86_64 UEFI", 14); return 0; }
 
 static int cmd_clear(int argc, char** argv) {
-    video_clear(0);
-    cursor_x = 5;
-    cursor_y = 30;
-    return 0;
+    video_clear(0); cursor_x = 5; cursor_y = 30; return 0;
 }
 
 static int cmd_neofetch(int argc, char** argv) {
-    shell_print("    .-\"-.     ", 15); 
-    shell_print("   / ..  \\    ", 15); shell_print("OS: cofeuOS v3.0", 11); 
-    shell_print("  | (  )  |   ", 15); shell_print("Kernel: x86_32", 11); 
-    shell_print("   \\ ..  /    ", 15); shell_print("Shell: Cofeu Shell", 11); 
-    shell_print("    `---'      ", 15); shell_print("Host: cofeu", 11); 
-    shell_print("Resolution: 320x200", 11); 
-    shell_print("Disk: /dev/sda1", 11); 
-    shell_print("Memory: 16MB", 11); 
-    shell_print("Uptime: 0 days", 11); 
-    shell_print("Network: no NIC driver installed", 12); 
-    shell_print("Note: Ethernet stack requires kernel driver support.", 12); 
+    shell_print("    .-\"-.     ", 15);
+    shell_print("   / ..  \\    ", 15); shell_print("OS: cofeuOS v3.0", 11);
+    shell_print("  | (  )  |   ", 15); shell_print("Kernel: x86_64 UEFI", 11);
+    shell_print("   \\ ..  /    ", 15); shell_print("Shell: Cofeu Shell", 11);
+    shell_print("    `---'      ", 15); shell_print("Host: cofeu", 11);
+    shell_print("Python: MicroPython", 11);
+    shell_print("Disk: /dev/sda1", 11);
+    shell_print("Memory: 16MB", 11);
     return 0;
 }
 
 static int cmd_text_editor(int argc, char** argv, const char* editor_name) {
     shell_print("========================================", 14);
-    
     shell_print(editor_name, 14);
     shell_print(" editor - :w = save, :q = quit, :wq = save+quit", 14);
-    
 
     char path[MAX_PATH_LEN] = "";
-    if (argc > 1) {
-        fs_resolve_path(g_shell.cwd, argv[1], path);
-    }
+    if (argc > 1) fs_resolve_path(g_shell.cwd, argv[1], path);
     shell_print("File: ", 7);
     shell_print(path[0] ? path : "<no file>", 15);
-    
     shell_print("========================================", 14);
-    
 
     char buffer[FILE_CONTENT_SIZE];
     int len = 0;
     if (path[0]) {
         int sz = fs_read_file(&g_fs, path, buffer, sizeof(buffer) - 1);
-        if (sz >= 0) {
-            buffer[sz] = '\0';
-            len = sz;
-            shell_print("Loaded file content. Append lines and save with :wq.", 15);
-            
-        } else {
-            buffer[0] = '\0';
-            shell_print("New file will be created. Use :wq to save.", 15);
-            
-        }
-    } else {
-        buffer[0] = '\0';
-        shell_print("No file specified. Use :q to exit.", 15);
-        
-    }
+        if (sz >= 0) { buffer[sz] = '\0'; len = sz; }
+        else { buffer[0] = '\0'; }
+    } else { buffer[0] = '\0'; }
 
     char line[80];
     while (1) {
@@ -352,151 +292,198 @@ static int cmd_text_editor(int argc, char** argv, const char* editor_name) {
         cursor_x = 25;
         main_get_input(line, 80);
 
-        if (line[0] == ':' && strcmp(line, ":q") == 0) {
-            break;
-        }
-        if (line[0] == ':' && strcmp(line, ":wq") == 0) {
+        if (strcmp(line, ":q") == 0) break;
+        if (strcmp(line, ":wq") == 0 || strcmp(line, ":w") == 0) {
             if (path[0]) {
                 fs_write_file(&g_fs, path, buffer, len);
-                shell_print("Saved file.", 10);
-                
-            } else {
-                shell_print("No filename given. Use nano <file> or vim <file>.", 12);
-                
+                shell_print("Saved.", 10);
             }
-            break;
-        }
-        if (line[0] == ':' && strcmp(line, ":w") == 0) {
-            if (path[0]) {
-                fs_write_file(&g_fs, path, buffer, len);
-                shell_print("Saved file.", 10);
-                
-            } else {
-                shell_print("No filename given. Use nano <file> or vim <file>.", 12);
-                
-            }
+            if (strcmp(line, ":wq") == 0) break;
             continue;
         }
 
-        int line_len = strlen(line);
-        if (len + line_len + 1 < (int)sizeof(buffer)) {
-            memcpy(buffer + len, line, line_len);
-            len += line_len;
+        int ll = strlen(line);
+        if (len + ll + 1 < (int)sizeof(buffer)) {
+            memcpy(buffer + len, line, ll);
+            len += ll;
             buffer[len++] = '\n';
             buffer[len] = '\0';
-            shell_print(line, 15);
-            
-        } else {
-            shell_print("Editor buffer full.", 12);
-            
-            break;
         }
     }
-
-    shell_print(editor_name, 14);
-    shell_print(" exited.", 14);
-    
     return 0;
 }
 
-static int cmd_vim(int argc, char** argv) {
-    return cmd_text_editor(argc, argv, "vim");
-}
+static int cmd_vim(int argc, char** argv)  { return cmd_text_editor(argc, argv, "vim"); }
+static int cmd_nano(int argc, char** argv) { return cmd_text_editor(argc, argv, "nano"); }
 
 static int cmd_reboot(int argc, char** argv) {
-    shell_print("Rebooting cofeuOS...", 14);
-    
+    shell_print("Rebooting...", 14);
     outb(0x64, 0xFE);
-    while(1);
-    return 0;
+    while(1); return 0;
 }
 
 static int cmd_halt(int argc, char** argv) {
     shell_print("cofeuOS halted.", 12);
-    
-    while(1);
-    return 0;
+    while(1); return 0;
 }
 
 static int cmd_ifconfig(int argc, char** argv) {
-    shell_print("eth0: no hardware driver installed", 12);
-    
-    shell_print("IP: 0.0.0.0", 12);
-    
-    shell_print("Netmask: 255.255.255.0", 12);
-    
-    shell_print("Gateway: 0.0.0.0", 12);
-    
-    shell_print("Note: Ethernet support requires NIC driver and TCP/IP stack.", 12);
-    
-    return 0;
+    shell_print("eth0: no hardware driver installed", 12); return 0;
 }
 
 static int cmd_ping(int argc, char** argv) {
-    if (argc < 2) {
-        shell_print("ping: hostname required", 12);
-        
-        return -1;
-    }
-    shell_print("ping: network stack not implemented yet", 12);
-    
-    return -1;
+    shell_print("ping: network stack not implemented", 12); return -1;
 }
 
 static int cmd_touch(int argc, char** argv) {
-    if (argc < 2) {
-        shell_print("touch: filename required", 12);
-        
-        return -1;
-    }
+    if (argc < 2) { shell_print("touch: filename required", 12); return -1; }
     char res[256];
     fs_resolve_path(g_shell.cwd, argv[1], res);
     fs_create_file(&g_fs, res, "", 0);
-    shell_print("Created file: ", 10);
-    shell_print(argv[1], 10);
-    
+    shell_print("Created: ", 10); shell_print(argv[1], 10); shell_newline();
     return 0;
 }
 
 static int cmd_mkdir(int argc, char** argv) {
-    if (argc < 2) {
-        shell_print("mkdir: dirname required", 12);
-        
-        return -1;
-    }
+    if (argc < 2) { shell_print("mkdir: dirname required", 12); return -1; }
     char res[256];
     fs_resolve_path(g_shell.cwd, argv[1], res);
     fs_create_dir(&g_fs, res);
-    shell_print("Created directory: ", 10);
-    shell_print(argv[1], 10);
-    
+    shell_print("Created directory: ", 10); shell_print(argv[1], 10); shell_newline();
     return 0;
 }
 
 static int cmd_rm(int argc, char** argv) {
-    if (argc < 2) {
-        shell_print("rm: filename required", 12);
-        
-        return -1;
-    }
+    if (argc < 2) { shell_print("rm: filename required", 12); return -1; }
     char res[256];
     fs_resolve_path(g_shell.cwd, argv[1], res);
     fs_delete_file(&g_fs, res);
-    shell_print("Removed: ", 10);
-    shell_print(argv[1], 10);
-    
+    shell_print("Removed: ", 10); shell_print(argv[1], 10); shell_newline();
     return 0;
 }
 
+static int cmd_rmdir(int argc, char** argv) {
+    if (argc < 2) { shell_print("rmdir: dirname required", 12); return -1; }
+    char res[256];
+    fs_resolve_path(g_shell.cwd, argv[1], res);
+    fs_delete_dir(&g_fs, res);
+    shell_print("Removed directory: ", 10); shell_print(argv[1], 10); shell_newline();
+    return 0;
+}
+
+/* ─── RODO / SUDO ─────────────────────────────────────────────── */
+
+/* Rodo şifre veritabanı */
+#define RODO_MAX_USERS 8
+typedef struct {
+    char username[32];
+    char password[32];
+    int  is_root;
+} rodo_user_t;
+
+static rodo_user_t rodo_users[RODO_MAX_USERS];
+static int rodo_user_count = 0;
+static int rodo_initialized = 0;
+
+static void rodo_init(void) {
+    if (rodo_initialized) return;
+    strcpy(rodo_users[0].username, "root");
+    rodo_users[0].password[0] = '\0'; /* Şifre yok henüz */
+    rodo_users[0].is_root = 1;
+    rodo_user_count = 1;
+    rodo_initialized = 1;
+}
+
+static int rodo_get_password(char *buf, int maxlen) {
+    int pos = 0;
+    while (pos < maxlen - 1) {
+        char ch = read_key();
+        if (ch == '\n') {
+            buf[pos] = '\0';
+            shell_newline();
+            return pos;
+        } else if (ch == '\b') {
+            if (pos > 0) {
+                pos--;
+                cursor_x -= font_width;
+                video_clear_rect(cursor_x, cursor_y, font_width, font_height);
+            }
+        } else if (ch >= 32) {
+            buf[pos++] = ch;
+            video_draw_char('*', cursor_x, cursor_y, 15);
+            cursor_x += font_width;
+        }
+    }
+    buf[pos] = '\0';
+    return pos;
+}
+
 static int cmd_rodo(int argc, char** argv) {
+    rodo_init();
+
+    /* rodo passwd — şifre değiştirme */
+    if (argc == 2 && strcmp(argv[1], "passwd") == 0) {
+        /* Eğer şifre yoksa direkt yeni şifre al */
+        if (rodo_users[0].password[0] != '\0') {
+            shell_print("[rodo] mevcut root sifresi: ", 15);
+            char oldpass[32];
+            rodo_get_password(oldpass, sizeof(oldpass));
+            if (strcmp(rodo_users[0].password, oldpass) != 0) {
+                shell_print("rodo: yanlis sifre", 12); shell_newline();
+                return -1;
+            }
+        }
+        shell_print("[rodo] yeni sifre: ", 15);
+        char newpass[32];
+        rodo_get_password(newpass, sizeof(newpass));
+        shell_print("[rodo] tekrar: ", 15);
+        char newpass2[32];
+        rodo_get_password(newpass2, sizeof(newpass2));
+        if (strcmp(newpass, newpass2) != 0) {
+            shell_print("rodo: sifreler uyusmuyor", 12); shell_newline();
+            return -1;
+        }
+        strcpy(rodo_users[0].password, newpass);
+        shell_print("rodo: sifre belirlendi", 10); shell_newline();
+        return 0;
+    }
+
     if (argc < 2) {
-        shell_print("rodo: command required", 12);
-        
+        shell_print("kullanim: rodo <komut>", 12); shell_newline();
+        shell_print("         rodo passwd  (sifre degistir)", 12); shell_newline();
         return -1;
     }
 
-    shell_print("rodo: running as root", 10);
-    
+    /* İlk kullanımda şifre belirle */
+    if (rodo_users[0].password[0] == '\0') {
+        shell_print("[rodo] ilk kurulum - yeni root sifresi: ", 14);
+        char newpass[32];
+        rodo_get_password(newpass, sizeof(newpass));
+        shell_print("[rodo] tekrar: ", 14);
+        char newpass2[32];
+        rodo_get_password(newpass2, sizeof(newpass2));
+        if (strcmp(newpass, newpass2) != 0) {
+            shell_print("rodo: sifreler uyusmuyor", 12); shell_newline();
+            return -1;
+        }
+        strcpy(rodo_users[0].password, newpass);
+        shell_print("rodo: sifre belirlendi", 10); shell_newline();
+    }
+
+    /* Şifre iste */
+    shell_print("[rodo] ", 10);
+    shell_print(g_shell.user, 10);
+    shell_print(" icin root sifresi: ", 15);
+
+    char password[32];
+    rodo_get_password(password, sizeof(password));
+
+    if (strcmp(rodo_users[0].password, password) != 0) {
+        shell_print("rodo: yanlis sifre", 12); shell_newline();
+        return -1;
+    }
+
+    shell_print("rodo: yetkilendirildi", 10); shell_newline();
 
     char command[512];
     int pos = 0;
@@ -505,147 +492,121 @@ static int cmd_rodo(int argc, char** argv) {
         if (pos + len + 2 >= (int)sizeof(command)) break;
         strcpy(&command[pos], argv[i]);
         pos += len;
-        if (i < argc - 1) {
-            command[pos++] = ' ';
-        }
+        if (i < argc - 1) command[pos++] = ' ';
     }
     command[pos] = '\0';
     return shell_execute(command);
 }
 
-static int cmd_sudo(int argc, char** argv) {
-    return cmd_rodo(argc, argv);
-}
+/* ─── Diğer komutlar ──────────────────────────────────────────── */
 
 static int cmd_pacman(int argc, char** argv) {
-    if (argc < 2) {
-        shell_print("pacman: usage: pacman -S <pkg> | -Ss <pkg> | -Sy | -Syu", 12);
-        
-        return -1;
-    }
-
+    if (argc < 2) { shell_print("kullanim: pacman -S/-Ss/-Sy/-Syu <paket>", 12); shell_newline(); return -1; }
     if (strcmp(argv[1], "-S") == 0) {
-        if (argc < 3) {
-            shell_print("pacman: package name required", 12);
-            
-            return -1;
-        }
-        shell_print("installing package: ", 10);
-        shell_print(argv[2], 10);
-        
-        return 0;
+        if (argc < 3) { shell_print("pacman: paket adi gerekli", 12); shell_newline(); return -1; }
+        shell_print("yukleniyor: ", 10); shell_print(argv[2], 10); shell_newline(); return 0;
     }
-
     if (strcmp(argv[1], "-Ss") == 0) {
-        if (argc < 3) {
-            shell_print("pacman: package search required", 12);
-            
-            return -1;
-        }
-        shell_print("search results for: ", 11);
-        shell_print(argv[2], 11);
-        
-        shell_print("community/" , 10); shell_print(argv[2], 10); 
-        return 0;
+        if (argc < 3) { shell_print("pacman: arama terimi gerekli", 12); shell_newline(); return -1; }
+        shell_print("arama sonucu: ", 11); shell_print(argv[2], 11); shell_newline(); return 0;
     }
-
-    if (strcmp(argv[1], "-Sy") == 0) {
-        shell_print("syncing package databases... done", 10);
-        
-        return 0;
-    }
-
-    if (strcmp(argv[1], "-Syu") == 0) {
-        shell_print("synchronizing package databases and upgrading... done", 10);
-        
-        return 0;
-    }
-
-    shell_print("pacman: unsupported operation", 12);
-    
+    if (strcmp(argv[1], "-Sy") == 0)  { shell_print("paket veritabani guncellendi", 10); shell_newline(); return 0; }
+    if (strcmp(argv[1], "-Syu") == 0) { shell_print("sistem guncellendi", 10); shell_newline(); return 0; }
+    shell_print("pacman: bilinmeyen islem", 12); shell_newline();
     return -1;
 }
 
-static int cmd_rmdir(int argc, char** argv) {
-    if (argc < 2) {
-        shell_print("rmdir: dirname required", 12);
-        
-        return -1;
-    }
-    char res[256];
-    fs_resolve_path(g_shell.cwd, argv[1], res);
-    fs_delete_dir(&g_fs, res);
-    shell_print("Removed directory: ", 10);
-    shell_print(argv[1], 10);
-    
-    return 0;
-}
-
-static int cmd_nano(int argc, char** argv) {
-    return cmd_text_editor(argc, argv, "nano");
-}
-
 static int shell_atoi(const char* s) {
-    int sign = 1;
-    int value = 0;
-
-    if (*s == '-') {
-        sign = -1;
-        s++;
-    }
-
-    while (*s >= '0' && *s <= '9') {
-        value = value * 10 + (*s - '0');
-        s++;
-    }
-
+    int sign = 1, value = 0;
+    if (*s == '-') { sign = -1; s++; }
+    while (*s >= '0' && *s <= '9') { value = value * 10 + (*s - '0'); s++; }
     return value * sign;
 }
 
 static void shell_print_int(int value, u8 color) {
-    char buf[16];
-    int pos = 0;
-
-    if (value == 0) {
-        shell_print("0", color);
-        return;
-    }
-
-    if (value < 0) {
-        shell_print("-", color);
-        value = -value;
-    }
-
-    while (value > 0 && pos < (int)sizeof(buf)) {
-        buf[pos++] = '0' + (value % 10);
-        value /= 10;
-    }
-
-    while (pos > 0) {
-        char out[2] = { buf[--pos], '\0' };
-        shell_print(out, color);
-    }
+    char buf[16]; int pos = 0;
+    if (value == 0) { shell_print("0", color); return; }
+    if (value < 0) { shell_print("-", color); value = -value; }
+    while (value > 0 && pos < (int)sizeof(buf)) { buf[pos++] = '0' + (value % 10); value /= 10; }
+    while (pos > 0) { char out[2] = { buf[--pos], '\0' }; shell_print(out, color); }
 }
 
 static void shell_join_args(char** argv, int start, int argc, char* out, int out_size) {
     int pos = 0;
     for (int i = start; i < argc; i++) {
         int len = strlen(argv[i]);
-        if (pos + len + 2 >= out_size) {
-            break;
-        }
+        if (pos + len + 2 >= out_size) break;
         strcpy(&out[pos], argv[i]);
         pos += len;
-        if (i < argc - 1) {
-            out[pos++] = ' ';
-        }
+        if (i < argc - 1) out[pos++] = ' ';
     }
     out[pos] = '\0';
 }
 
-static void desktop_text(const char* str, int x, int y, u8 color) {
-    video_print(str, x, y, color);
+static int cmd_apps(int argc, char** argv) {
+    shell_print("Yuklu uygulamalar:\n", 14);
+    shell_print("desktop/startx  grafik masaustu\n", 15);
+    shell_print("python/python3  MicroPython REPL\n", 15);
+    shell_print("calc write nano vim sysinfo neofetch pacman\n", 15);
+    return 0;
 }
+
+static int cmd_about(int argc, char** argv) {
+    shell_print("cofeuOS v3.0\n", 14);
+    shell_print("UEFI GOP destekli, MicroPython entegreli mini isletim sistemi.", 15);
+    shell_newline();
+    return 0;
+}
+
+static int cmd_sysinfo(int argc, char** argv) {
+    shell_print("Sistem Bilgisi:\n", 14);
+    shell_print("OS: cofeuOS v3.0\n", 11);
+    shell_print("Kernel: x86_64 UEFI GOP\n", 11);
+    shell_print("Video: ", 11);
+    shell_print_int(SCREEN_WIDTH, 11); shell_print("x", 11);
+    shell_print_int(SCREEN_HEIGHT, 11); shell_print("x32bpp\n", 11);
+    shell_print("Bellek: 16MB\n", 11);
+    shell_print("FS: cofeuFS (RAM)\n", 11);
+    shell_print("Python: MicroPython embed\n", 11);
+    return 0;
+}
+
+static int cmd_calc(int argc, char** argv) {
+    if (argc < 4) { shell_print("kullanim: calc <a> +|-|*|/ <b>", 12); shell_newline(); return -1; }
+    int a = shell_atoi(argv[1]), b = shell_atoi(argv[3]), result = 0;
+    if      (strcmp(argv[2], "+") == 0) result = a + b;
+    else if (strcmp(argv[2], "-") == 0) result = a - b;
+    else if (strcmp(argv[2], "*") == 0) result = a * b;
+    else if (strcmp(argv[2], "/") == 0) {
+        if (b == 0) { shell_print("calc: sifira bolme", 12); shell_newline(); return -1; }
+        result = a / b;
+    } else { shell_print("calc: bilinmeyen operator", 12); shell_newline(); return -1; }
+    shell_print_int(result, 10); shell_newline();
+    return 0;
+}
+
+static int cmd_write(int argc, char** argv) {
+    if (argc < 3) { shell_print("kullanim: write <dosya> <metin...>", 12); shell_newline(); return -1; }
+    char path[MAX_PATH_LEN], text[512];
+    fs_resolve_path(g_shell.cwd, argv[1], path);
+    shell_join_args(argv, 2, argc, text, sizeof(text));
+    fs_write_file(&g_fs, path, text, strlen(text));
+    shell_print("yazildi: ", 10); shell_print(argv[1], 10); shell_newline();
+    return 0;
+}
+
+static int cmd_theme(int argc, char** argv) {
+    video_clear(0);
+    video_fill_rect(0, 0, SCREEN_WIDTH, 16, 9);
+    video_fill_rect(0, 16, SCREEN_WIDTH, 16, 3);
+    video_fill_rect(0, 32, SCREEN_WIDTH, 16, 5);
+    cursor_x = 5; cursor_y = 56;
+    shell_print("Tema onizlemesi. Terminale donmek icin clear yaz.", 14);
+    shell_newline();
+    return 0;
+}
+
+static void desktop_text(const char* str, int x, int y, u8 color) { video_print(str, x, y, color); }
 
 static void desktop_draw_window(int x, int y, int w, int h, const char* title, u8 body_color) {
     video_fill_rect(x, y, w, h, body_color);
@@ -661,223 +622,90 @@ static void desktop_draw_base(const char* status) {
     video_fill_rect(0, SCREEN_HEIGHT - 20, SCREEN_WIDTH, 20, 8);
     desktop_text("cofeuDE", 6, 5, 15);
     desktop_text("Desktop", SCREEN_WIDTH - 70, 5, 15);
-
     video_fill_rect(10, 28, 34, 34, 3);
     video_draw_rect(10, 28, 34, 34, 15);
     desktop_text("Files", 8, 66, 15);
-
     video_fill_rect(58, 28, 34, 34, 5);
     video_draw_rect(58, 28, 34, 34, 15);
     desktop_text("Notes", 55, 66, 15);
-
     video_fill_rect(106, 28, 34, 34, 6);
     video_draw_rect(106, 28, 34, 34, 15);
     desktop_text("Info", 108, 66, 15);
-
     desktop_draw_window(152, 34, SCREEN_WIDTH - 164, SCREEN_HEIGHT - 74, "Welcome", 7);
     desktop_text("apps: files notes info term exit", 160, 54, 0);
-    desktop_text("type a desktop command below", 160, 68, 0);
-
     desktop_text(status, 6, SCREEN_HEIGHT - 15, 15);
 }
 
 static void desktop_show_files(void) {
     char buf[512];
     int sz = fs_list_dir(&g_fs, g_shell.cwd, buf, sizeof(buf));
-
     desktop_draw_base("Files app");
     desktop_draw_window(48, 82, SCREEN_WIDTH - 96, 72, "Files", 7);
-    desktop_text("Path:", 56, 104, 0);
-    desktop_text(g_shell.cwd, 94, 104, 1);
+    desktop_text(g_shell.cwd, 56, 104, 1);
     desktop_text(sz >= 0 && buf[0] ? buf : "(empty)", 56, 120, 0);
 }
 
 static void desktop_show_notes(void) {
     char note[256];
     int sz = fs_read_file(&g_fs, "/home/notes.txt", note, sizeof(note) - 1);
-
     desktop_draw_base("Notes app");
     desktop_draw_window(38, 82, SCREEN_WIDTH - 76, 76, "Notes", 7);
-    if (sz >= 0) {
-        note[sz] = '\0';
-        desktop_text(note, 46, 104, 0);
-    } else {
-        desktop_text("No notes yet. Use: write /home/notes.txt hello", 46, 104, 0);
-    }
+    if (sz >= 0) { note[sz] = '\0'; desktop_text(note, 46, 104, 0); }
+    else { desktop_text("Henuz not yok. write /home/notes.txt ile yaz.", 46, 104, 0); }
 }
 
 static void desktop_show_info(void) {
-    desktop_draw_base("System info");
+    desktop_draw_base("Sistem bilgisi");
     desktop_draw_window(48, 82, SCREEN_WIDTH - 96, 84, "System", 7);
-    desktop_text("cofeuOS v3.0", 58, 104, 0);
-    desktop_text("Kernel: x86 protected mode", 58, 118, 0);
-    desktop_text("Video: VESA framebuffer", 58, 132, 0);
+    desktop_text("cofeuOS v3.0 UEFI", 58, 104, 0);
+    desktop_text("Kernel: x86_64 GOP", 58, 118, 0);
+    desktop_text("Python: MicroPython embed", 58, 132, 0);
     desktop_text("Shell: cofeu shell + cofeuDE", 58, 146, 0);
-}
-
-static int cmd_apps(int argc, char** argv) {
-    shell_print("Installed apps:\n", 14);
-    
-    shell_print("desktop/startx  graphical desktop session\n", 15);
-    
-    shell_print("files           built into desktop\n", 15);
-    
-    shell_print("notes           built into desktop, reads /home/notes.txt\n", 15);
-    
-    shell_print("calc write nano vim sysinfo neofetch pacman\n", 15);
-    
-    return 0;
-}
-
-static int cmd_about(int argc, char** argv) {
-    shell_print("cofeuOS v3.0\n", 14);
-    
-    shell_print("A tiny protected-mode x86 OS with VESA graphics, shell, RAM fs and cofeuDE.", 15);
-    
-    return 0;
-}
-
-static int cmd_sysinfo(int argc, char** argv) {
-    shell_print("System information:\n", 14);
-    
-    shell_print("OS: cofeuOS v3.0", 11);
-    
-    shell_print("Kernel: i386 protected mode", 11);
-    
-    shell_print("Video: VESA framebuffer ", 11);
-    shell_print_int(SCREEN_WIDTH, 11);
-    shell_print("x", 11);
-    shell_print_int(SCREEN_HEIGHT, 11);
-    shell_print("x", 11);
-    shell_print("32", 11);   // GOP her zaman 32bpp
-    
-    shell_print("Memory arena: 16MB", 11);
-    
-    shell_print("Filesystem: in-memory cofeuFS", 11);
-    
-    return 0;
-}
-
-static int cmd_calc(int argc, char** argv) {
-    if (argc < 4) {
-        shell_print("usage: calc <a> +|-|*|/ <b>", 12);
-        
-        return -1;
-    }
-
-    int a = shell_atoi(argv[1]);
-    int b = shell_atoi(argv[3]);
-    int result = 0;
-
-    if (strcmp(argv[2], "+") == 0) result = a + b;
-    else if (strcmp(argv[2], "-") == 0) result = a - b;
-    else if (strcmp(argv[2], "*") == 0) result = a * b;
-    else if (strcmp(argv[2], "/") == 0) {
-        if (b == 0) {
-            shell_print("calc: division by zero", 12);
-            
-            return -1;
-        }
-        result = a / b;
-    } else {
-        shell_print("calc: unknown operator", 12);
-        
-        return -1;
-    }
-
-    shell_print_int(result, 10);
-    
-    return 0;
-}
-
-static int cmd_write(int argc, char** argv) {
-    if (argc < 3) {
-        shell_print("usage: write <file> <text...>", 12);
-        
-        return -1;
-    }
-
-    char path[MAX_PATH_LEN];
-    char text[512];
-    fs_resolve_path(g_shell.cwd, argv[1], path);
-    shell_join_args(argv, 2, argc, text, sizeof(text));
-    fs_write_file(&g_fs, path, text, strlen(text));
-    shell_print("wrote ", 10);
-    shell_print(argv[1], 10);
-    
-    return 0;
-}
-
-static int cmd_theme(int argc, char** argv) {
-    video_clear(0);
-    video_fill_rect(0, 0, SCREEN_WIDTH, 16, 9);
-    video_fill_rect(0, 16, SCREEN_WIDTH, 16, 3);
-    video_fill_rect(0, 32, SCREEN_WIDTH, 16, 5);
-    cursor_x = 5;
-    cursor_y = 56;
-    shell_print("Theme preview applied. Use clear to return to terminal background.", 14);
-    
-    return 0;
 }
 
 static int cmd_desktop(int argc, char** argv) {
     char input[64];
-
     fs_create_dir(&g_fs, "/home");
-    if (!fs_file_exists(&g_fs, "/home/notes.txt")) {
-        fs_create_file(&g_fs, "/home/notes.txt", "Welcome to cofeuDE.", 19);
-    }
-
-    desktop_draw_base("Ready");
-
+    if (!fs_file_exists(&g_fs, "/home/notes.txt"))
+        fs_create_file(&g_fs, "/home/notes.txt", "cofeuDE'ye hosgeldiniz.", 23);
+    desktop_draw_base("Hazir");
     while (1) {
-        cursor_x = 8;
-        cursor_y = SCREEN_HEIGHT - 15;
+        cursor_x = 8; cursor_y = SCREEN_HEIGHT - 15;
         video_fill_rect(0, SCREEN_HEIGHT - 20, SCREEN_WIDTH, 20, 8);
         desktop_text("desktop> ", 6, SCREEN_HEIGHT - 15, 15);
         cursor_x = 78;
         main_get_input(input, sizeof(input));
-
-        if (strcmp(input, "exit") == 0 || strcmp(input, "term") == 0 || strcmp(input, "shell") == 0) {
-            video_clear(0);
-            cursor_x = 5;
-            cursor_y = 30;
-            shell_print("Exited cofeuDE.", 10);
-            
+        if (strcmp(input, "exit") == 0 || strcmp(input, "term") == 0) {
+            video_clear(0); cursor_x = 5; cursor_y = 30;
+            shell_print("cofeuDE'den cikild.", 10); shell_newline();
             return 0;
         }
-        if (strcmp(input, "files") == 0) {
-            desktop_show_files();
-            continue;
-        }
-        if (strcmp(input, "notes") == 0) {
-            desktop_show_notes();
-            continue;
-        }
-        if (strcmp(input, "info") == 0 || strcmp(input, "about") == 0) {
-            desktop_show_info();
-            continue;
-        }
-        if (strcmp(input, "clear") == 0 || strcmp(input, "home") == 0) {
-            desktop_draw_base("Ready");
-            continue;
-        }
-
-        desktop_draw_base("Unknown app. Try files, notes, info, term, exit.");
+        if (strcmp(input, "files") == 0) { desktop_show_files(); continue; }
+        if (strcmp(input, "notes") == 0) { desktop_show_notes(); continue; }
+        if (strcmp(input, "info")  == 0) { desktop_show_info();  continue; }
+        if (strcmp(input, "clear") == 0 || strcmp(input, "home") == 0) { desktop_draw_base("Hazir"); continue; }
+        desktop_draw_base("Bilinmeyen komut. files notes info term exit");
     }
 }
 
-static int cmd_date(int argc, char** argv) { shell_print("Thu Jan 1 00:00:00 2025", 14);  return 0; }
-static int cmd_uptime(int argc, char** argv) { shell_print("uptime 0 days", 14);  return 0; }
-static int cmd_free(int argc, char** argv) { shell_print("free: 16MB total", 14);  return 0; }
-static int cmd_ps(int argc, char** argv) { shell_print("PID 1 shell\nPID 2 cofeuDE-ready", 15);  return 0; }
-static int cmd_df(int argc, char** argv) { shell_print("/dev/sda1 16MB 6% used", 15);  return 0; }
+static int cmd_date(int argc, char** argv)   { shell_print("Thu Jan 1 00:00:00 2025", 14); shell_newline(); return 0; }
+static int cmd_uptime(int argc, char** argv) { shell_print("uptime: 0 gun", 14); shell_newline(); return 0; }
+static int cmd_free(int argc, char** argv)   { shell_print("Toplam: 16MB", 14); shell_newline(); return 0; }
+static int cmd_ps(int argc, char** argv)     { shell_print("PID 1 shell\nPID 2 cofeuDE", 15); shell_newline(); return 0; }
+static int cmd_df(int argc, char** argv)     { shell_print("/dev/sda1 16MB %6 kullanildi", 15); shell_newline(); return 0; }
+
 static int cmd_echo(int argc, char** argv) {
     for (int i = 1; i < argc; i++) {
         shell_print(argv[i], 15);
         if (i < argc - 1) shell_print(" ", 15);
     }
-    
+    shell_newline();
     return 0;
 }
-static int cmd_env(int argc, char** argv) { shell_print("USER=", 15); shell_print(g_shell.user, 15); shell_print(" HOST=cofeu PATH=/bin SHELL=/bin/cofeush", 15);  return 0; }
+
+static int cmd_env(int argc, char** argv) {
+    shell_print("USER=", 15); shell_print(g_shell.user, 15);
+    shell_print(" HOST=cofeu PATH=/bin SHELL=/bin/cofeush", 15);
+    shell_newline();
+    return 0;
+}static int cmd_sudo(int argc, char** argv) { return cmd_rodo(argc, argv); }
