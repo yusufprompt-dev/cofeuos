@@ -142,7 +142,17 @@ clean:
 	       $(BOOT_DIR)/*.o \
 	       $(SRC_DIR)/lib/*.o \
 	       $(SRC_DIR)/kernel/*.o
-
+# ─── ISO Oluşturma ─────────────────────────────────────
+iso: BOOTX64.EFI
+	@echo ">>> ISO oluşturuluyor..."
+	@mkdir -p iso/EFI/BOOT
+	@cp BOOTX64.EFI iso/EFI/BOOT/
+	xorriso -as mkisofs \
+	  -e EFI/BOOT/BOOTX64.EFI \
+	  -no-emul-boot -boot-load-size 4 -boot-info-table \
+	  -o CofeuOS-x86_64.iso \
+	  iso
+	@echo ">>> $(ISO_NAME) hazır!"
 # MicroPython
 MP_DIR = src/micropython_embed
 MP_SRCS = $(shell find $(MP_DIR) -name "*.c")
