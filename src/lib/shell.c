@@ -36,6 +36,8 @@ static int cmd_neofetch(int argc, char** argv);
 static int cmd_vim(int argc, char** argv);
 static int cmd_ifconfig(int argc, char** argv);
 static int cmd_ping(int argc, char** argv);
+static int cmd_wget(int argc, char** argv);
+static void shell_print_int(int value, u8 color);
 static int cmd_reboot(int argc, char** argv);
 static int cmd_halt(int argc, char** argv);
 static int cmd_touch(int argc, char** argv);
@@ -145,6 +147,7 @@ int shell_execute(const char* cmd) {
     if (strcmp(args[0], "pacman") == 0) return cmd_pacman(argc, args);
     if (strcmp(args[0], "ifconfig") == 0) return cmd_ifconfig(argc, args);
     if (strcmp(args[0], "ping") == 0) return cmd_ping(argc, args);
+    if (strcmp(args[0], "wget") == 0) return cmd_wget(argc, args);
     if (strcmp(args[0], "date") == 0) return cmd_date(argc, args);
     if (strcmp(args[0], "uptime") == 0) return cmd_uptime(argc, args);
     if (strcmp(args[0], "free") == 0) return cmd_free(argc, args);
@@ -427,7 +430,273 @@ static int cmd_mkdir(int argc, char** argv) {
     shell_print("Created directory: ", 10); shell_print(argv[1], 10); shell_newline();
     return 0;
 }
+static int parse_http_url(const char* input, char* host, int host_len, char* path, int path_len) {
+    const char* p = input;
+    if (p == NULL || host == NULL || path == NULL) return -1;
 
+    if (strncmp(p, "http://", 7) == 0) {
+        p += 7;
+    } else if (strncmp(p, "https://", 8) == 0) {
+        p += 8;
+    } else {
+        return -1;
+    }
+
+    const char* slash = strchr(p, '/');
+    const char* query = strchr(p, '?');
+    const char* end = slash ? slash : (query ? query : p + strlen(p));
+    size_t host_len_value = (size_t)(end - p);
+    if (host_len_value == 0 || host_len_value >= (size_t)host_len) {
+        host_len_value = (size_t)(host_len - 1);
+    }
+    memcpy(host, p, host_len_value);
+    host[host_len_value] = '\0';
+
+    const char* path_start = slash ? slash : "/";
+    const char* path_end = query ? query : path_start + strlen(path_start);
+    size_t path_len_value = (size_t)(path_end - path_start);
+    if (path_len_value == 0) {
+        path_len_value = 1;
+    }
+    if (path_len_value >= (size_t)path_len) {
+        path_len_value = (size_t)(path_len - 1);
+    }
+    memcpy(path, path_start, path_len_value);
+    path[path_len_value] = '\0';
+
+    if (path[0] != '/') {
+        size_t len = strlen(path);
+        if (len + 2 <= (size_t)path_len) {
+            memmove(path + 1, path, len + 1);
+            path[0] = '/';
+        }
+    }
+
+    if (path[0] == '\0') {
+        strcpy(path, "/index.html");
+    }
+    return 0;
+}
+
+static void join_remote_path(const char* base, const char* child, char* out, int out_len) {
+    if (base == NULL || child == NULL || out == NULL || out_len <= 0) return;
+    out[0] = '\0';
+    if (base[0] == '\0') {
+        if (child[0] != '/') {
+            out[0] = '/'; out[1] = '\0';
+        }
+        strncat(out, child, (size_t)(out_len - 1));
+        return;
+    }
+
+    strncat(out, base, (size_t)(out_len - 1));
+    if (out[0] != '\0' && out[strlen(out) - 1] != '/' && child[0] != '/') {
+        if (strlen(out) + 1 < (size_t)out_len) {
+            strcat(out, "/");
+        }
+    }
+    if (child[0] != '\0' && child[0] != '/') {
+        strncat(out, child, (size_t)(out_len - 1));
+    } else {
+        strncat(out, child, (size_t)(out_len - 1));
+    }
+}
+
+static void join_local_path(const char* base, const char* child, char* out, int out_len) {
+    if (base == NULL || child == NULL || out == NULL || out_len <= 0) return;
+    out[0] = '\0';
+    if (base[0] == '\0') {
+        strncat(out, child, (size_t)(out_len - 1));
+        return;
+    }
+
+    strncat(out, base, (size_t)(out_len - 1));
+    if (out[0] != '\0' && out[strlen(out) - 1] != '/' && child[0] != '/') {
+        if (strlen(out) + 1 < (size_t)out_len) {
+            strcat(out, "/");
+        }
+    }
+    strncat(out, child, (size_t)(out_len - 1));
+}
+
+static int download_directory_contents(const char* host, const char* remote_dir, const char* local_dir, char* buf, int buflen) {
+    char remote_path[256];
+    char local_path[256];
+    char child_remote[256];
+    char child_local[256];
+    char temp_target[256];
+    char temp_buf[4096];
+    char *href;
+
+    if (remote_dir == NULL || local_dir == NULL || buf == NULL || buflen <= 0) return -1;
+
+    strcpy(temp_target, "/.wget_tmp");
+    if (fs_create_dir(&g_fs, local_dir) < 0 && !fs_dir_exists(&g_fs, local_dir)) {
+        return -1;
+    }
+
+    strcpy(remote_path, remote_dir);
+    if (remote_path[0] == '\0') {
+        strcpy(remote_path, "/");
+    }
+    if (remote_path[strlen(remote_path) - 1] != '/') {
+        strcat(remote_path, "/");
+    }
+
+    int len = wget(host, remote_path, temp_target, temp_buf, sizeof(temp_buf) - 1);
+    if (len <= 0) return -1;
+    temp_buf[len] = '\0';
+
+    href = strstr(temp_buf, "href=");
+    while (href != NULL) {
+        char link[256];
+        char *start = strchr(href + 6, '"');
+        char *end;
+        if (start == NULL) break;
+        start++;
+        end = strchr(start, '"');
+        if (end == NULL) break;
+
+        int link_len = (int)(end - start);
+        if (link_len <= 0 || link_len >= (int)sizeof(link)) link_len = (int)sizeof(link) - 1;
+        memcpy(link, start, link_len);
+        link[link_len] = '\0';
+
+        if (strcmp(link, ".") == 0 || strcmp(link, "..") == 0 || link[0] == '#' || strcmp(link, "/") == 0) {
+            href = strstr(end + 1, "href=");
+            continue;
+        }
+
+        if (strncmp(link, "http://", 7) == 0 || strncmp(link, "https://", 8) == 0) {
+            href = strstr(end + 1, "href=");
+            continue;
+        }
+
+        join_remote_path(remote_dir, link, child_remote, sizeof(child_remote));
+        join_local_path(local_dir, link, child_local, sizeof(child_local));
+        if (child_local[strlen(child_local) - 1] == '/') {
+            child_local[strlen(child_local) - 1] = '\0';
+        }
+
+        if (link[strlen(link) - 1] == '/') {
+            if (fs_create_dir(&g_fs, child_local) < 0 && !fs_dir_exists(&g_fs, child_local)) {
+                href = strstr(end + 1, "href=");
+                continue;
+            }
+            download_directory_contents(host, child_remote, child_local, buf, buflen);
+        } else {
+            wget(host, child_remote, child_local, buf, buflen);
+        }
+
+        href = strstr(end + 1, "href=");
+    }
+
+    return 0;
+}
+
+static int cmd_wget(int argc, char** argv) {
+    if (argc < 2) { shell_print("kullanim: wget <url>", 12); shell_newline(); return -1; }
+    if (!network_available()) { shell_print("wget: network yok", 12); shell_newline(); return -1; }
+    
+    shell_print("wget: indiriliyor...", 15); shell_newline();
+
+    char host[64];
+    char http_path[256];
+    char target[256];
+    char target_dir[256];
+    char local_path[256];
+    char remote_path[256];
+    int directory_mode = 0;
+
+    if (parse_http_url(argv[1], host, sizeof(host), http_path, sizeof(http_path)) == 0) {
+        strcpy(remote_path, http_path);
+        strcpy(local_path, http_path);
+    } else {
+        strcpy(host, "10.0.2.2");
+        if (argv[1][0] == '/') {
+            strcpy(remote_path, argv[1]);
+            strcpy(local_path, argv[1]);
+            directory_mode = 0;
+        } else {
+            remote_path[0] = '/';
+            remote_path[1] = '\0';
+            strcat(remote_path, argv[1]);
+            strcpy(local_path, argv[1]);
+            directory_mode = 1;
+        }
+    }
+
+    if (remote_path[0] == '\0' || strcmp(remote_path, "/") == 0) {
+        strcpy(remote_path, "/index.html");
+        strcpy(local_path, "/index.html");
+        directory_mode = 0;
+    }
+
+    if (directory_mode) {
+        if (fs_resolve_path(g_shell.cwd, local_path, target_dir) != 0) {
+            shell_print("wget: yol hatasi", 12); shell_newline();
+            return -1;
+        }
+        if (fs_create_dir(&g_fs, target_dir) < 0 && !fs_dir_exists(&g_fs, target_dir)) {
+            shell_print("wget: dizin olusturulamadi", 12); shell_newline();
+            return -1;
+        }
+        strcpy(target, target_dir);
+        shell_print("wget: klasor modu", 10); shell_newline();
+    } else {
+        if (fs_resolve_path(g_shell.cwd, local_path, target) != 0) {
+            shell_print("wget: yol hatasi", 12); shell_newline();
+            return -1;
+        }
+    }
+
+    shell_print("wget: kayit yolu: ", 10); shell_print(target, 10); shell_newline();
+
+    static char buf[4096];
+    int len;
+    if (directory_mode) {
+        if (download_directory_contents(host, remote_path, target_dir, buf, sizeof(buf) - 1) < 0) {
+            shell_print("wget: dizin indirilemedi", 12); shell_newline();
+            return -1;
+        }
+        shell_print("wget: dizin indirildi", 10); shell_newline();
+        return 0;
+    }
+
+    len = wget(host, remote_path, target, buf, sizeof(buf) - 1);
+    
+    if (len < 0) { 
+        shell_print("wget: baglanti hatasi (", 12); 
+        shell_print_int(len, 10);
+        shell_print(")", 12);
+        shell_newline(); 
+        return -1; 
+    }
+    
+    if (len == 0) {
+        shell_print("wget: veri alinmadi", 12); shell_newline();
+        return -1;
+    }
+    
+    buf[len] = '\0';
+    shell_print("wget: ", 10); shell_print_int(len, 10);
+    shell_print(" byte alindi", 10); shell_newline();
+    
+    /* Dosyanin yazilip yazilmadigini kontrol et */
+    if (fs_file_exists(&g_fs, target)) {
+        int file_size = fs_read_file(&g_fs, target, buf, sizeof(buf) - 1);
+        shell_print("wget: dosya kaydedildi (", 10);
+        shell_print_int(file_size, 10);
+        shell_print(" byte)", 10);
+        shell_newline();
+    } else {
+        shell_print("wget: dosya kaydedilemedi!", 12); shell_newline();
+    }
+    
+    shell_print(buf, 15);
+    shell_newline();
+    return 0;
+}
 static int cmd_rm(int argc, char** argv) {
     if (argc < 2) { shell_print("rm: filename required", 12); return -1; }
     char res[256];

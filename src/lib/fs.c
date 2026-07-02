@@ -39,6 +39,27 @@ int fs_init(fs_control_block* fs) {
     return 0;
 }
 
+static int fs_ensure_parent_dirs(fs_control_block* fs, const char* path) {
+    char parent[MAX_PATH_LEN];
+    if (fs_get_parent_path(path, parent) != 0) {
+        return -1;
+    }
+
+    if (strcmp(parent, "/") == 0 || strcmp(parent, ".") == 0) {
+        return 0;
+    }
+
+    if (fs_dir_exists(fs, parent)) {
+        return 0;
+    }
+
+    if (fs_ensure_parent_dirs(fs, parent) != 0) {
+        return -1;
+    }
+
+    return fs_create_dir(fs, parent);
+}
+
 /* Dosya oluştur */
 int fs_create_file(fs_control_block* fs, const char* path, const char* content, size_t size) {
     /* Yolu çöz */
@@ -47,11 +68,13 @@ int fs_create_file(fs_control_block* fs, const char* path, const char* content, 
         return -1; /* Geçersiz yol */
     }
     
-    /* Dizin var mı kontrol et */
+    /* Üst dizinleri oluştur */
     char parent[MAX_PATH_LEN];
     fs_get_parent_path(resolved, parent);
     if (!fs_dir_exists(fs, parent)) {
-        return -2; /* Dizin yok */
+        if (fs_ensure_parent_dirs(fs, resolved) != 0) {
+            return -2; /* Dizin oluşturulamadı */
+        }
     }
     
     /* Dosya zaten var mı kontrol et */
@@ -315,54 +338,58 @@ int fs_resolve_path(const char* base, const char* path, char* resolved) {
     if (path == NULL || resolved == NULL) {
         return -1;
     }
+
+    bool path_absolute = (path[0] == '/');
+    bool result_absolute = path_absolute;  /* true if path is absolute, OR if base is absolute */
     
-    /* Mutlak yol mu? */
-    if (path[0] == '/') {
+    if (path_absolute) {
         strcpy(resolved, path);
     } else {
-        /* Göreli yol */
         strcpy(resolved, base);
-        if (resolved[strlen(resolved)-1] != '/') {
+        result_absolute = (base[0] == '/');  /* inherit absolute status from base */
+        if (resolved[strlen(resolved) - 1] != '/') {
             strcat(resolved, "/");
         }
         strcat(resolved, path);
     }
-    
-    /* Yolu temizle */
+
     char temp[MAX_PATH_LEN];
     strcpy(temp, resolved);
     resolved[0] = '\0';
-    
+
     char* token = strtok(temp, "/");
-    bool first = true;
-    
     while (token != NULL) {
         if (strcmp(token, ".") == 0) {
-            /* Mevcut dizin - atla */
+            /* mevcut dizin - atla */
         } else if (strcmp(token, "..") == 0) {
-            /* Üst dizine git */
-            if (!first) {
+            if (strcmp(resolved, "/") != 0 && resolved[0] != '\0') {
                 char* last_slash = strrchr(resolved, '/');
                 if (last_slash != NULL) {
-                    *last_slash = '\0';
+                    if (last_slash == resolved) {
+                        *(last_slash + 1) = '\0';
+                    } else {
+                        *last_slash = '\0';
+                    }
                 }
             }
         } else {
-            /* Normal dizin */
-            if (!first) {
+            if (resolved[0] == '\0') {
+                if (result_absolute) {
+                    strcpy(resolved, "/");
+                }
+            }
+            if (strcmp(resolved, "/") != 0 && resolved[0] != '\0') {
                 strcat(resolved, "/");
             }
             strcat(resolved, token);
         }
         token = strtok(NULL, "/");
-        first = false;
     }
-    
-    /* Kök dizin kontrolü */
+
     if (resolved[0] == '\0') {
-        strcpy(resolved, "/");
+        strcpy(resolved, result_absolute ? "/" : ".");
     }
-    
+
     return 0;
 }
 

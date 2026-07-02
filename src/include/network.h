@@ -1,12 +1,12 @@
-#ifndef _NETWORK_H
-#define _NETWORK_H
+#ifndef NETWORK_H
+#define NETWORK_H
 
 void network_init(void *st);
 int  network_available(void);
 void network_get_mac(unsigned char *mac);
+void network_get_ip(unsigned char *ip);
+void network_dhcp(void);
+int  network_ping(unsigned char *dst_ip);
+int  wget(const char *host, const char *http_path, const char *save_path, char *buf, int maxlen);
 
 #endif
-void network_set_ip(unsigned char a, unsigned char b, unsigned char c, unsigned char d);
-void network_get_ip(unsigned char *ip);
-int  network_has_ip(void);
-void network_dhcp(void);int network_ping(unsigned char *dst_ip);

@@ -53,6 +53,21 @@ char* strchr(const char* s, int c) {
     return (char*)s;
 }
 
+char* strstr(const char* haystack, const char* needle) {
+    if (*needle == '\0') return (char*)haystack;
+    while (*haystack != '\0') {
+        const char* h = haystack;
+        const char* n = needle;
+        while (*n != '\0' && *h == *n) {
+            h++;
+            n++;
+        }
+        if (*n == '\0') return (char*)haystack;
+        haystack++;
+    }
+    return NULL;
+}
+
 int memcmp(const void* s1, const void* s2, size_t n) {
     const unsigned char* p1 = (const unsigned char*)s1;
     const unsigned char* p2 = (const unsigned char*)s2;
