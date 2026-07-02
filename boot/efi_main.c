@@ -16,6 +16,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
 
     /* Klavyeyi başlat */
     keyboard_init(SystemTable);
+    extern void network_init(void *st);
+    network_init(SystemTable);
 
     /* GOP'u bul */
     EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;

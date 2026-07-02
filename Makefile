@@ -47,6 +47,7 @@ OBJS = $(BOOT_DIR)/efi_main.o \
        $(SRC_DIR)/lib/shell.o \
        $(SRC_DIR)/lib/python.o \
        $(SRC_DIR)/lib/keyboard.o \
+       $(SRC_DIR)/lib/network.o \
        font.o
 
 # ─── Hedefler ──────────────────────────────────────────
@@ -93,6 +94,9 @@ $(SRC_DIR)/lib/python.o: $(SRC_DIR)/lib/python.c
 	$(CC) $(CFLAGS_K) -c $< -o $@
 
 $(SRC_DIR)/lib/keyboard.o: $(SRC_DIR)/lib/keyboard.c
+$(SRC_DIR)/lib/network.o: $(SRC_DIR)/lib/network.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
 	$(CC) $(CFLAGS_K) -c $< -o $@
 
 # ─── Font ──────────────────────────────────────────────

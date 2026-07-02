@@ -13,6 +13,7 @@ int num_splits = 1;
 #include "../include/types.h"
 #include "../include/python.h"
 #include "../include/keyboard.h"
+#include "../include/network.h"
 
 
 extern shell_control g_shell;
@@ -328,11 +329,85 @@ static int cmd_halt(int argc, char** argv) {
 }
 
 static int cmd_ifconfig(int argc, char** argv) {
-    shell_print("eth0: no hardware driver installed", 12); return 0;
+    network_dhcp();
+    
+    if (!network_available()) {
+        shell_print("eth0: NIC bulunamadi", 12);
+        shell_newline();
+        return -1;
+    }
+    
+    unsigned char mac[6];
+    network_get_mac(mac);
+    
+    shell_print("eth0: aktif\n", 10);
+    shell_print("MAC: ", 15);
+    char hex[3];
+    for (int i = 0; i < 6; i++) {
+        hex[0] = "0123456789ABCDEF"[mac[i] >> 4];
+        hex[1] = "0123456789ABCDEF"[mac[i] & 0xF];
+        hex[2] = '\0';
+        shell_print(hex, 15);
+        if (i < 5) shell_print(":", 15);
+    }
+    shell_newline();
+    
+    unsigned char ip[4];
+    network_get_ip(ip);
+    if (ip[0] != 0) {
+        shell_print("IP: ", 15);
+        char num[4];
+        for (int i = 0; i < 4; i++) {
+            int n = ip[i], pos = 0;
+            if (n == 0) { num[pos++] = '0'; }
+            else { while (n > 0) { num[pos++] = '0' + (n % 10); n /= 10; } }
+            /* ters çevir */
+            for (int a = 0, b = pos-1; a < b; a++, b--) {
+                char t = num[a]; num[a] = num[b]; num[b] = t;
+            }
+            num[pos] = '\0';
+            shell_print(num, 15);
+            if (i < 3) shell_print(".", 15);
+        }
+        shell_newline();
+    } else {
+        shell_print("IP: atanmamis (dhcp kullan)", 12);
+        shell_newline();
+    }
+    return 0;
 }
 
 static int cmd_ping(int argc, char** argv) {
-    shell_print("ping: network stack not implemented", 12); return -1;
+    if (argc < 2) { shell_print("kullanim: ping <ip>", 12); shell_newline(); return -1; }
+    if (!network_available()) { shell_print("ping: network yok", 12); shell_newline(); return -1; }
+
+    /* IP'yi parse et */
+    unsigned char ip[4] = {0,0,0,0};
+    const char *p = argv[1];
+    for (int i = 0; i < 4; i++) {
+        int n = 0;
+        while (*p >= '0' && *p <= '9') { n = n*10 + (*p - '0'); p++; }
+        ip[i] = (unsigned char)n;
+        if (*p == '.') p++;
+    }
+
+    shell_print("PING ", 15); shell_print(argv[1], 15); shell_newline();
+
+    for (int i = 0; i < 4; i++) {
+        int r = network_ping(ip);
+        if (r == 0) {
+            shell_print("64 bytes from ", 10);
+            shell_print(argv[1], 10);
+            shell_print(": icmp_seq=", 10);
+            char seq[2] = {'1'+(char)i, '\0'};
+            shell_print(seq, 10);
+            shell_newline();
+        } else {
+            shell_print("Request timeout", 12);
+            shell_newline();
+        }
+    }
+    return 0;
 }
 
 static int cmd_touch(int argc, char** argv) {
