@@ -10,6 +10,8 @@ EFI_INC = /usr/include/efi
 # ─── Dosya Yolları ─────────────────────────────────────
 BOOT_DIR = boot
 SRC_DIR  = src
+ISO_NAME = CofeuOS-x86_64.iso
+ISO_ROOT = iso
 
 # ─── EFI Derleme Bayrakları ────────────────────────────
 CFLAGS_EFI = -target x86_64-unknown-windows \
@@ -54,7 +56,16 @@ OBJS = $(BOOT_DIR)/efi_main.o \
 chkstk.o: chkstk.c
 	$(CC) $(CFLAGS_K) -c chkstk.c -o chkstk.o
 
-all: BOOTX64.EFI
+all: $(ISO_NAME)
+
+$(ISO_NAME): BOOTX64.EFI
+	rm -f $@
+	mkdir -p /tmp/cofeu_iso/EFI/BOOT
+	cp -r $(ISO_ROOT)/. /tmp/cofeu_iso/ 2>/dev/null || true
+	cp BOOTX64.EFI /tmp/cofeu_iso/EFI/BOOT/BOOTX64.EFI
+	xorriso -indev /dev/null -outdev $@ -map /tmp/cofeu_iso / -boot_image any path=/EFI/BOOT/BOOTX64.EFI -commit >/dev/null
+	rm -rf /tmp/cofeu_iso
+	@echo ">>> $(ISO_NAME) hazir!"
 
 BOOTX64.EFI: $(OBJS) $(MP_OBJS) src/uefi_stdlib.o
 	$(LD) $(LDFLAGS) $(OBJS) $(MP_OBJS) src/uefi_stdlib.o font.o chkstk.o -out:$@
@@ -124,7 +135,7 @@ uefi-disk.img: BOOTX64.EFI
 
 # ─── Temizlik ──────────────────────────────────────────
 clean:
-	rm -rf *.efi *.EFI *.so *.img *.psf font.o \
+	rm -rf *.efi *.EFI *.so *.img *.psf *.iso font.o \
 	       $(BOOT_DIR)/*.o \
 	       $(SRC_DIR)/lib/*.o \
 	       $(SRC_DIR)/kernel/*.o
