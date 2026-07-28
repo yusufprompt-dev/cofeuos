@@ -251,6 +251,7 @@ void kernel_main(gop_info_t *gop_info, void *mem_base) {
     /* Shell varsayılanları */
     strcpy(g_shell.host,      "cofeu");
     strcpy(g_shell.partition, "/dev/sda1");
+    /* /dev/sda1 bir aygıt dosyasıdır; çalışma dizini olamaz. */
     strcpy(g_shell.cwd,       "/");
 
     cursor_x = 5;

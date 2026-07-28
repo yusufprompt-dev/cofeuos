@@ -27,8 +27,8 @@ void mem_init(memory_arena* arena, void* start, size_t size) {
 void* kmalloc(memory_arena* arena, size_t size) {
     if (size == 0) return NULL;
     
-    /* Hizalama için boyutu ayarla */
-    size = (size + 3) & ~3;
+    /* 16 byte hizalama (cache line uyumlu) */
+    size = (size + 15) & ~15;
     
     memory_block* current = arena->first_block;
     

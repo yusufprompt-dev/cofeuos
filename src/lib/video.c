@@ -67,9 +67,21 @@ static inline void put(int x, int y, u8 color_idx) {
 /* ─── Temizleme ──────────────────────────────────────────────── */
 void video_clear(u8 color) {
     u32 c = palette[color & 0xF];
-    for (u32 y = 0; y < gop_height; y++)
-        for (u32 x = 0; x < gop_width; x++)
-            g_fb[y * g_pitch + x] = c;
+    /* Satır satır doldur (daha hızlı) */
+    for (u32 y = 0; y < gop_height; y++) {
+        u32 *row = g_fb + y * g_pitch;
+        u32 x = 0;
+        /* 4'lü doldurma */
+        for (; x + 3 < gop_width; x += 4) {
+            row[x] = c;
+            row[x + 1] = c;
+            row[x + 2] = c;
+            row[x + 3] = c;
+        }
+        for (; x < gop_width; x++) {
+            row[x] = c;
+        }
+    }
 }
 
 void video_clear_rect(int x, int y, int w, int h) {
@@ -79,9 +91,20 @@ void video_clear_rect(int x, int y, int w, int h) {
 /* ─── Dikdörtgen ─────────────────────────────────────────────── */
 void video_fill_rect(int x, int y, int w, int h, u8 color) {
     u32 c = palette[color & 0xF];
-    for (int dy = 0; dy < h; dy++)
-        for (int dx = 0; dx < w; dx++)
-            video_put_pixel(x + dx, y + dy, c);
+    for (int dy = 0; dy < h; dy++) {
+        u32 *row = g_fb + (u32)(y + dy) * g_pitch + (u32)x;
+        int dx = 0;
+        /* 4'lü doldurma */
+        for (; dx + 3 < w; dx += 4) {
+            row[dx] = c;
+            row[dx + 1] = c;
+            row[dx + 2] = c;
+            row[dx + 3] = c;
+        }
+        for (; dx < w; dx++) {
+            row[dx] = c;
+        }
+    }
 }
 
 void video_draw_rect(int x, int y, int w, int h, u8 color) {

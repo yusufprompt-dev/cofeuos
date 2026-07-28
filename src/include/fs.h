@@ -14,7 +14,8 @@
 #define MAX_FILENAME    64
 #define MAX_FILES       64
 #define MAX_DIRS        32
-#define FILE_CONTENT_SIZE 4096
+/* curl ile indirilen küçük web sayfalarını kesmeden tutabilmek için 16 KiB. */
+#define FILE_CONTENT_SIZE 16384
 
 /* Dosya türleri */
 typedef enum {
@@ -33,7 +34,7 @@ typedef struct {
     u32 owner;
     u32 group;
     bool active;
-    char content[FILE_CONTENT_SIZE];
+    char content[FILE_CONTENT_SIZE + 1]; /* NUL sonlandırıcısı için ek bayt */
 } file_info;
 
 /* Dizin bilgisi */

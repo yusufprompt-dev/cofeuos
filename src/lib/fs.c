@@ -123,6 +123,9 @@ int fs_create_dir(fs_control_block* fs, const char* path) {
     if (fs_dir_exists(fs, resolved)) {
         return -2; /* Dizin zaten var */
     }
+    if (fs_file_exists(fs, resolved)) {
+        return -5; /* Normal dosya, dizin olarak kullanılamaz */
+    }
     
     /* Dizin limiti kontrol et */
     if (fs->dir_count >= MAX_DIRS) {
@@ -186,8 +189,11 @@ int fs_write_file(fs_control_block* fs, const char* path, const char* content, s
         }
     }
     
-    /* Dosya yoksa oluştur */
-    return fs_create_file(fs, resolved, content, size);
+    /* Dosya yoksa oluştur. fs_write_file her iki durumda da yazılan
+       bayt sayısını döndürür; çağıranlar başarıyı tutarlı biçimde denetler. */
+    int result = fs_create_file(fs, resolved, content, size);
+    if (result < 0) return result;
+    return (int)((size > FILE_CONTENT_SIZE) ? FILE_CONTENT_SIZE : size);
 }
 
 /* Dosya sil */
@@ -220,16 +226,30 @@ int fs_delete_dir(fs_control_block* fs, const char* path) {
     /* Dizin var mı kontrol et */
     for (size_t i = 0; i < fs->dir_count; i++) {
         if (fs->dirs[i].active && strcmp(fs->dirs[i].path, resolved) == 0) {
-            /* Alt dosyaları ve dizinleri kontrol et */
+            size_t resolved_len = strlen(resolved);
+            
+            /* Alt dosyaları kontrol et (prefix + / ile tam eşleşme) */
             for (size_t j = 0; j < fs->file_count; j++) {
-                if (fs->files[j].active && strncmp(fs->files[j].path, resolved, strlen(resolved)) == 0) {
-                    return -3; /* Dizin içinde dosyalar var */
+                if (fs->files[j].active) {
+                    /* Tam yol eşleşmesi veya / ile başlayan alt yol */
+                    if (strncmp(fs->files[j].path, resolved, resolved_len) == 0) {
+                        char next_char = fs->files[j].path[resolved_len];
+                        if (next_char == '/' || next_char == '\0') {
+                            return -3; /* Dizin içinde dosyalar var */
+                        }
+                    }
                 }
             }
             
+            /* Alt dizinleri kontrol et (prefix + / ile tam eşleşme) */
             for (size_t j = 0; j < fs->dir_count; j++) {
-                if (fs->dirs[j].active && j != i && strncmp(fs->dirs[j].path, resolved, strlen(resolved)) == 0) {
-                    return -4; /* Dizin içinde alt dizinler var */
+                if (fs->dirs[j].active && j != i) {
+                    if (strncmp(fs->dirs[j].path, resolved, resolved_len) == 0) {
+                        char next_char = fs->dirs[j].path[resolved_len];
+                        if (next_char == '/' || next_char == '\0') {
+                            return -4; /* Dizin içinde alt dizinler var */
+                        }
+                    }
                 }
             }
             

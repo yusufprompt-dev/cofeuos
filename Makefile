@@ -67,8 +67,8 @@ $(ISO_NAME): BOOTX64.EFI
 	rm -rf /tmp/cofeu_iso
 	@echo ">>> $(ISO_NAME) hazir!"
 
-BOOTX64.EFI: $(OBJS) $(MP_OBJS) src/uefi_stdlib.o
-	$(LD) $(LDFLAGS) $(OBJS) $(MP_OBJS) src/uefi_stdlib.o font.o chkstk.o -out:$@
+BOOTX64.EFI: $(OBJS) $(MP_OBJS) src/uefi_stdlib.o chkstk.o
+	$(LD) $(LDFLAGS) $(OBJS) $(MP_OBJS) src/uefi_stdlib.o chkstk.o -out:$@
 	@echo ">>> BOOTX64.EFI hazir!"
 
 # ─── EFI Entry ─────────────────────────────────────────
@@ -123,9 +123,10 @@ font.o: font_data.c
 # ─── QEMU ile Test ─────────────────────────────────────
 run: uefi-disk.img
 	qemu-system-x86_64 \
-	  -bios /usr/share/edk2/x64/OVMF.4m.fd \
+	  -bios /usr/share/ovmf/OVMF.fd \
 	  -drive format=raw,file=$< \
-	  -m 256M
+	  -m 256M \
+	  -netdev user,id=net0 -device e1000,netdev=net0
 
 uefi-disk.img: BOOTX64.EFI
 	dd if=/dev/zero of=$@ bs=1M count=64

@@ -14,6 +14,7 @@ int num_splits = 1;
 #include "../include/python.h"
 #include "../include/keyboard.h"
 #include "../include/network.h"
+#include "../include/memory.h"
 
 
 extern shell_control g_shell;
@@ -63,7 +64,11 @@ static int cmd_calc(int argc, char** argv);
 static int cmd_write(int argc, char** argv);
 static int cmd_desktop(int argc, char** argv);
 static int cmd_theme(int argc, char** argv);
-
+static int cmd_curl(int argc, char** argv);
+static int cmd_unzip(int argc, char** argv);
+static int cmd_untar(int argc, char** argv);
+static int cmd_nettest(int argc, char** argv);
+static int cmd_nslookup(int argc, char** argv);
 
 int shell_execute(const char* cmd);
 
@@ -163,6 +168,11 @@ int shell_execute(const char* cmd) {
     if (strcmp(args[0], "desktop") == 0) return cmd_desktop(argc, args);
     if (strcmp(args[0], "startx") == 0) return cmd_desktop(argc, args);
     if (strcmp(args[0], "theme") == 0) return cmd_theme(argc, args);
+    if (strcmp(args[0], "curl") == 0) return cmd_curl(argc, args);
+    if (strcmp(args[0], "unzip") == 0) return cmd_unzip(argc, args);
+    if (strcmp(args[0], "untar") == 0 || strcmp(args[0], "tar") == 0) return cmd_untar(argc, args);
+    if (strcmp(args[0], "nettest") == 0) return cmd_nettest(argc, args);
+    if (strcmp(args[0], "nslookup") == 0) return cmd_nslookup(argc, args);
     if (strcmp(args[0], "python") == 0 || strcmp(args[0], "python3") == 0) { if (argc > 1) { python_run_file(args[1]); } else { python_repl(); } return 0; }
 
     shell_print("cofeuOS: '", 12);
@@ -176,10 +186,11 @@ static int cmd_help(int argc, char** argv) {
     shell_print("cofeuOS Unix Shell Komutlari:\n", 14);
     shell_print("Dosya: ls cat pwd cd touch mkdir rm rmdir\n", 15);
     shell_print("Dosya: write nano vim\n", 15);
+    shell_print("Arsiv: unzip untar\n", 15);
     shell_print("Sistem: whoami uname clear date uptime free ps df echo env sysinfo\n", 15);
     shell_print("Diger: neofetch calc apps about theme desktop startx rodo reboot halt\n", 15);
     shell_print("Paket: pacman\n", 15);
-    shell_print("Ag: ifconfig ping\n", 15);
+    shell_print("Ag: ifconfig nslookup nettest ping wget curl\n", 15);
     shell_print("Python: python / python3\n", 11);
     return 0;
 }
@@ -271,6 +282,8 @@ static int cmd_neofetch(int argc, char** argv) {
 }
 
 static int cmd_text_editor(int argc, char** argv, const char* editor_name) {
+    extern memory_arena g_mem_arena;
+    
     shell_print("========================================", 14);
     shell_print(editor_name, 14);
     shell_print(" editor - :w = save, :q = quit, :wq = save+quit", 14);
@@ -281,20 +294,28 @@ static int cmd_text_editor(int argc, char** argv, const char* editor_name) {
     shell_print(path[0] ? path : "<no file>", 15);
     shell_print("========================================", 14);
 
-    char buffer[FILE_CONTENT_SIZE];
+    /* Büyük buffer için heap bellek ayır */
+    int buf_size = 32 * 1024; /* 32KB */
+    char *buffer = (char*)kmalloc(&g_mem_arena, buf_size);
+    if (!buffer) {
+        shell_print("editor: bellek yetersiz", 12);
+        shell_newline();
+        return -1;
+    }
+    
     int len = 0;
     if (path[0]) {
-        int sz = fs_read_file(&g_fs, path, buffer, sizeof(buffer) - 1);
+        int sz = fs_read_file(&g_fs, path, buffer, buf_size - 1);
         if (sz >= 0) { buffer[sz] = '\0'; len = sz; }
         else { buffer[0] = '\0'; }
     } else { buffer[0] = '\0'; }
 
-    char line[80];
+    char line[256];
     while (1) {
         cursor_x = 5;
         video_print("> ", 7, cursor_y, 7);
         cursor_x = 25;
-        main_get_input(line, 80);
+        main_get_input(line, sizeof(line));
 
         if (strcmp(line, ":q") == 0) break;
         if (strcmp(line, ":wq") == 0 || strcmp(line, ":w") == 0) {
@@ -307,13 +328,18 @@ static int cmd_text_editor(int argc, char** argv, const char* editor_name) {
         }
 
         int ll = strlen(line);
-        if (len + ll + 1 < (int)sizeof(buffer)) {
+        if (len + ll + 2 < buf_size) {
             memcpy(buffer + len, line, ll);
             len += ll;
             buffer[len++] = '\n';
             buffer[len] = '\0';
+        } else {
+            shell_print("editor: buffer dolu!", 12);
+            shell_newline();
         }
     }
+    
+    kfree(&g_mem_arena, buffer);
     return 0;
 }
 
@@ -322,13 +348,16 @@ static int cmd_nano(int argc, char** argv) { return cmd_text_editor(argc, argv, 
 
 static int cmd_reboot(int argc, char** argv) {
     shell_print("Rebooting...", 14);
-    outb(0x64, 0xFE);
-    while(1); return 0;
+    uefi_reset_system();
+    for (;;) { __asm__ volatile("hlt"); }
+    return 0;
 }
 
 static int cmd_halt(int argc, char** argv) {
     shell_print("cofeuOS halted.", 12);
-    while(1); return 0;
+    uefi_shutdown();
+    for (;;) { __asm__ volatile("hlt"); }
+    return 0;
 }
 
 static int cmd_ifconfig(int argc, char** argv) {
@@ -521,7 +550,6 @@ static void join_local_path(const char* base, const char* child, char* out, int 
 
 static int download_directory_contents(const char* host, const char* remote_dir, const char* local_dir, char* buf, int buflen) {
     char remote_path[256];
-    char local_path[256];
     char child_remote[256];
     char child_local[256];
     char temp_target[256];
@@ -891,6 +919,9 @@ static int cmd_apps(int argc, char** argv) {
     shell_print("Yuklu uygulamalar:\n", 14);
     shell_print("desktop/startx  grafik masaustu\n", 15);
     shell_print("python/python3  MicroPython REPL\n", 15);
+    shell_print("curl            HTTP istekleri (domain destekli)\n", 15);
+    shell_print("unzip           ZIP dosyasi cikarma\n", 15);
+    shell_print("untar           TAR dosyasi cikarma\n", 15);
     shell_print("calc write nano vim sysinfo neofetch pacman\n", 15);
     return 0;
 }
@@ -947,6 +978,580 @@ static int cmd_theme(int argc, char** argv) {
     cursor_x = 5; cursor_y = 56;
     shell_print("Tema onizlemesi. Terminale donmek icin clear yaz.", 14);
     shell_newline();
+    return 0;
+}
+
+static int cmd_nslookup(int argc, char** argv) {
+    if (argc < 2) {
+        shell_print("kullanim: nslookup <domain>", 12); shell_newline();
+        return -1;
+    }
+    if (!network_available()) {
+        shell_print("nslookup: ag yok", 12); shell_newline();
+        return -1;
+    }
+    shell_print("Sorgulanıyor: ", 10); shell_print(argv[1], 15); shell_newline();
+    shell_print("DNS sunucu  : 10.0.2.3\n", 10);
+    unsigned char ip[4];
+    int r = dns_resolve(argv[1], ip);
+    if (r != 0) {
+        shell_print("nslookup: cozulemedi (DNS cevap yok)", 12); shell_newline();
+        return -1;
+    }
+    shell_print("Sonuc       : ", 10);
+    for (int i = 0; i < 4; i++) {
+        char tmp[4]; int t = 0; unsigned char v = ip[i];
+        if (v == 0) { tmp[t++] = '0'; }
+        else { while (v > 0) { tmp[t++] = '0' + v % 10; v /= 10; } }
+        for (int j = t - 1; j >= 0; j--) { char c[2] = { tmp[j], '\0' }; shell_print(c, 10); }
+        if (i < 3) shell_print(".", 10);
+    }
+    shell_newline();
+    return 0;
+}
+
+static int cmd_nettest(int argc, char** argv) {
+    (void)argc; (void)argv;
+    shell_print("[nettest] Ag teshisi basliyor...\n", 14);
+
+    /* 1. Surucu kontrolu */
+    shell_print("[1] Ag surucusu: ", 11);
+    if (!network_available()) {
+        shell_print("YOK! QEMU -netdev secenegi eksik?", 12); shell_newline();
+        return -1;
+    }
+    shell_print("OK\n", 10);
+
+    /* MAC + IP */
+    unsigned char mac[6], ip[4];
+    network_get_mac(mac);
+    network_get_ip(ip);
+    shell_print("    MAC: ", 11);
+    for (int i = 0; i < 6; i++) {
+        unsigned char b = mac[i];
+        const char *hex = "0123456789ABCDEF";
+        char h[3] = { hex[b>>4], hex[b&0xF], '\0' };
+        shell_print(h, 15);
+        if (i < 5) shell_print(":", 15);
+    }
+    shell_newline();
+    shell_print("    IP : 10.0.2.15\n", 11);
+
+    /* 2. ARP - gateway */
+    shell_print("[2] ARP (gateway 10.0.2.2): ", 11);
+    unsigned char gw[4] = {10,0,2,2};
+    unsigned char gw_mac[6] = {0,0,0,0,0,0};
+    int arp_r = arp_test(gw, gw_mac);
+    if (arp_r != 0) {
+        shell_print("BASARISIZ (gateway cevap vermiyor)", 12); shell_newline();
+        shell_print("    -> QEMU user-mode ag aktif degil olabilir", 12); shell_newline();
+        return -1;
+    }
+    shell_print("OK  MAC: ", 10);
+    for (int i = 0; i < 6; i++) {
+        const char *hex = "0123456789ABCDEF";
+        unsigned char b = gw_mac[i];
+        char h[3] = { hex[b>>4], hex[b&0xF], '\0' };
+        shell_print(h, 15);
+        if (i < 5) shell_print(":", 15);
+    }
+    shell_newline();
+
+    /* 3. DNS */
+    shell_print("[3] DNS (example.com -> 10.0.2.3): ", 11);
+    unsigned char resolved[4];
+    int dns_r = dns_resolve("example.com", resolved);
+    if (dns_r != 0) {
+        shell_print("BASARISIZ", 12); shell_newline();
+        shell_print("    -> DNS paketi gidip gelmiyor", 12); shell_newline();
+        shell_print("    -> Cozum: curl http://93.184.216.34/ dene", 14); shell_newline();
+        return -1;
+    }
+    shell_print("OK  IP: ", 10);
+    for (int i = 0; i < 4; i++) {
+        char tmp[4]; int t = 0; unsigned char v = resolved[i];
+        if (v == 0) { tmp[t++] = '0'; }
+        else { while (v > 0) { tmp[t++] = '0' + v % 10; v /= 10; } }
+        for (int j = t - 1; j >= 0; j--) { char c[2] = { tmp[j], '\0' }; shell_print(c, 10); }
+        if (i < 3) shell_print(".", 10);
+    }
+    shell_newline();
+
+    /* 4. TCP */
+    shell_print("[4] TCP (example.com:80 baglantiyor): ", 11);
+    int tcp_r = tcp_connect(resolved, 80);
+    if (tcp_r != 0) {
+        shell_print("BASARISIZ (SYN-ACK yok)", 12); shell_newline();
+        shell_print("    -> Hata kodu: ", 12);
+        shell_print_int(tcp_r, 12); shell_newline();
+        return -1;
+    }
+    shell_print("OK\n", 10);
+    tcp_disconnect(resolved, 80);
+
+    shell_print("[nettest] Tum testler BASARILI!\n", 10);
+    return 0;
+}
+
+/* ─── CURL Komutu (Domain + IP Destegi) ─────────────────── */
+static void curl_default_save_name(const char *host, char *out, size_t out_size) {
+    if (!out || out_size == 0) return;
+    (void)host;
+    /* curl'ün varsayılan çıktısı her zaman mevcut dizindeki index.html'dir. */
+    strncpy(out, "index.html", out_size - 1);
+    out[out_size - 1] = '\0';
+}
+
+static int cmd_curl(int argc, char** argv) {
+    if (argc < 2) {
+        shell_print("kullanim: curl [-v] [-o dosya] <url>", 12);
+        shell_newline();
+        shell_print("  -v        : verbose mod", 15);
+        shell_newline();
+        shell_print("  -o dosya  : sonucu verilen dosyaya kaydet", 15);
+        shell_newline();
+        shell_print("  varsayilan: mevcut dizinde index.html", 15);
+        shell_newline();
+        shell_print("  -X POST   : POST istegi gonder", 15);
+        shell_newline();
+        shell_print("  -d data   : POST verisi", 15);
+        shell_newline();
+        return -1;
+    }
+    
+    if (!network_available()) {
+        shell_print("curl: ag baglantisi yok", 12);
+        shell_newline();
+        return -1;
+    }
+    
+    int verbose = 0;
+    char save_path[MAX_PATH_LEN] = "";
+    char post_data[1024] = "";
+    int is_post = 0;
+    const char *url = NULL;
+    
+    /* Argümanları parse et */
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-v") == 0) {
+            verbose = 1;
+        } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
+            fs_resolve_path(g_shell.cwd, argv[++i], save_path);
+        } else if (strcmp(argv[i], "-X") == 0 && i + 1 < argc) {
+            if (strcmp(argv[++i], "POST") == 0) is_post = 1;
+        } else if (strcmp(argv[i], "-d") == 0 && i + 1 < argc) {
+            strcpy(post_data, argv[++i]);
+        } else {
+            url = argv[i];
+        }
+    }
+    
+    if (!url) {
+        shell_print("curl: URL gerekli", 12);
+        shell_newline();
+        return -1;
+    }
+    
+    /* URL parse et: http://domain/path veya http://ip/path */
+    char host[64] = "";
+    char path[256] = "/";
+    int use_https = 0;
+    
+    const char *p = url;
+    if (strncmp(p, "http://", 7) == 0) p += 7;
+    else if (strncmp(p, "https://", 8) == 0) { p += 8; use_https = 1; }
+    
+    /* Host adını al */
+    const char *slash = strchr(p, '/');
+    if (slash) {
+        int host_len = (int)(slash - p);
+        if (host_len >= (int)sizeof(host)) host_len = (int)sizeof(host) - 1;
+        memcpy(host, p, host_len);
+        host[host_len] = '\0';
+        strcpy(path, slash);
+    } else {
+        strcpy(host, p);
+        strcpy(path, "/");
+    }
+    
+    if (verbose) {
+        shell_print("curl: ", 11);
+        shell_print(host, 11);
+        shell_print(" -> ", 11);
+        shell_print(path, 11);
+        shell_newline();
+    }
+    
+    static char buf[16384];
+    int len;
+    
+    if (use_https) {
+        if (verbose) shell_print("curl: TLS baglantisi isteniyor...", 11);
+        len = https_get(host, path, buf, sizeof(buf) - 1);
+    } else if (is_post && post_data[0]) {
+        if (verbose) shell_print("curl: POST istegi gonderiliyor...", 11);
+        len = http_post(host, path, post_data, strlen(post_data), buf, sizeof(buf) - 1);
+    } else {
+        if (verbose) shell_print("curl: GET istegi gonderiliyor...", 11);
+        len = http_get(host, path, buf, sizeof(buf) - 1);
+    }
+    
+    if (len < 0) {
+        if (len == NETWORK_ERR_TLS_UNAVAILABLE) {
+            shell_print("curl: HTTPS/TLS ve CA deposu bu surumde kurulu degil", 12);
+            shell_newline();
+            return -1;
+        }
+        shell_print("curl: baglanti hatasi (", 12);
+        shell_print_int(len, 10);
+        shell_print(")", 12);
+        shell_newline();
+        return -1;
+    }
+    
+    if (len == 0) {
+        shell_print("curl: veri alinmadi", 12);
+        shell_newline();
+        return -1;
+    }
+    
+    buf[len] = '\0';
+    
+    if (!save_path[0]) {
+        char filename[MAX_FILENAME];
+        curl_default_save_name(host, filename, sizeof(filename));
+        if (fs_resolve_path(g_shell.cwd, filename, save_path) != 0) {
+            shell_print("curl: kayit yolu olusturulamadi", 12);
+            shell_newline();
+            return -1;
+        }
+    }
+
+    if (save_path[0]) {
+        int written = fs_write_file(&g_fs, save_path, buf, (size_t)len);
+        if (written != len) {
+            shell_print("curl: dosya sistemine kaydedilemedi", 12);
+            shell_newline();
+            return -1;
+        }
+        shell_print("curl: ", 10);
+        shell_print_int(len, 10);
+        shell_print(" byte HTML olarak kaydedildi: ", 10);
+        shell_print(save_path, 10);
+        shell_newline();
+    }
+    
+    return 0;
+}
+
+/* ─── ZIP Desteği ──────────────────────────────────────────────── */
+/* Basit ZIP okuyucu (sıkıştırılmamış dosyalar için) */
+typedef struct {
+    unsigned int signature;
+    unsigned short version;
+    unsigned short flags;
+    unsigned short compression;
+    unsigned short mod_time;
+    unsigned short mod_date;
+    unsigned int crc32;
+    unsigned int compressed_size;
+    unsigned int uncompressed_size;
+    unsigned short name_length;
+    unsigned short extra_length;
+} __attribute__((packed)) zip_local_file_header_t;
+
+typedef struct {
+    unsigned int signature;
+    unsigned short disk_num;
+    unsigned short central_disk;
+    unsigned short entries_disk;
+    unsigned short entries_total;
+    unsigned int central_size;
+    unsigned int central_offset;
+    unsigned short comment_length;
+} __attribute__((packed)) zip_end_of_central_t;
+
+static int zip_extract_file(const char *zip_data, int zip_size, const char *target_dir) {
+    int offset = 0;
+    int file_count = 0;
+    
+    while (offset + 30 <= zip_size) {
+        zip_local_file_header_t *hdr = (zip_local_file_header_t*)(zip_data + offset);
+        
+        /* Local file header imzası */
+        if (hdr->signature != 0x04034b50) break;
+        
+        int name_len = hdr->name_length;
+        int extra_len = hdr->extra_length;
+        int comp_size = hdr->compressed_size;
+        int uncomp_size = hdr->uncompressed_size;
+        
+        /* Dosya adı */
+        const char *name = zip_data + offset + 30;
+        offset += 30 + name_len + extra_len;
+        
+        if (offset + comp_size > zip_size) break;
+        
+        /* Dizin ise atla */
+        if (name[name_len - 1] == '/') {
+            offset += comp_size;
+            continue;
+        }
+        
+        /* Dosyayı kaydet */
+        char full_path[MAX_PATH_LEN];
+        if (target_dir[0]) {
+            strcpy(full_path, target_dir);
+            if (full_path[strlen(full_path) - 1] != '/') strcat(full_path, "/");
+        } else {
+            full_path[0] = '\0';
+        }
+        
+        /* path.basename */
+        const char *fname = name;
+        for (int i = 0; i < name_len; i++) {
+            if (name[i] == '/' || name[i] == '\\') fname = name + i + 1;
+        }
+        
+        strncat(full_path, fname, MAX_PATH_LEN - strlen(full_path) - 1);
+        
+        /* Sıkıştırma kontrolü */
+        if (hdr->compression == 0) {
+            /* Sıkıştırılmamış */
+            fs_create_file(&g_fs, full_path, zip_data + offset, uncomp_size);
+            file_count++;
+        }
+        /* DEFLATE desteği şu an yok, sadece stored dosyalar */
+        
+        offset += comp_size;
+    }
+    
+    return file_count;
+}
+
+static int cmd_unzip(int argc, char** argv) {
+    if (argc < 2) {
+        shell_print("kullanim: unzip <dosya.zip> [hedef_dizin]", 12);
+        shell_newline();
+        return -1;
+    }
+    
+    /* ZIP dosyasını oku */
+    char zip_path[MAX_PATH_LEN];
+    fs_resolve_path(g_shell.cwd, argv[1], zip_path);
+    
+    static char zip_buf[65536]; /* 64KB max */
+    int zip_size = fs_read_file(&g_fs, zip_path, zip_buf, sizeof(zip_buf) - 1);
+    
+    if (zip_size < 0) {
+        shell_print("unzip: dosya bulunamadi: ", 12);
+        shell_print(argv[1], 12);
+        shell_newline();
+        return -1;
+    }
+    
+    zip_buf[zip_size] = '\0';
+    
+    /* ZIP imzası kontrolü */
+    if (zip_size < 4 || *(unsigned int*)zip_buf != 0x04034b50) {
+        shell_print("unzip: gecerli bir ZIP dosyasi degil", 12);
+        shell_newline();
+        return -1;
+    }
+    
+    /* Hedef dizin */
+    char target_dir[MAX_PATH_LEN] = "";
+    if (argc > 2) {
+        fs_resolve_path(g_shell.cwd, argv[2], target_dir);
+        fs_create_dir(&g_fs, target_dir);
+    }
+    
+    int count = zip_extract_file(zip_buf, zip_size, target_dir);
+    
+    shell_print("unzip: ", 10);
+    shell_print_int(count, 10);
+    shell_print(" dosya cikarildi", 10);
+    shell_newline();
+    
+    return 0;
+}
+
+/* ─── TAR/GZ Desteği ──────────────────────────────────────────── */
+/* USTAR başlık formatı */
+typedef struct {
+    char name[100];
+    char mode[8];
+    char uid[8];
+    char gid[8];
+    char size[12];
+    char mtime[12];
+    char checksum[8];
+    char typeflag[1];
+    char linkname[100];
+    char magic[6];
+    char version[2];
+    char uname[32];
+    char gname[32];
+    char devmajor[8];
+    char devminor[8];
+    char prefix[155];
+} __attribute__((packed)) tar_ustar_t;
+
+/* Octal string'den int'e çevir */
+static int tar_octal(const char *s, int len) {
+    int result = 0;
+    for (int i = 0; i < len && s[i] >= '0' && s[i] <= '7'; i++) {
+        result = result * 8 + (s[i] - '0');
+    }
+    return result;
+}
+
+static int tar_extract_file(const char *tar_data, int tar_size, const char *target_dir) {
+    int offset = 0;
+    int file_count = 0;
+    
+    while (offset + 512 <= tar_size) {
+        tar_ustar_t *hdr = (tar_ustar_t*)(tar_data + offset);
+        
+        /* Boş blok kontrolü (tar sonu) */
+        int is_empty = 1;
+        for (int i = 0; i < 512; i++) {
+            if ((unsigned char)tar_data[offset + i] != 0) { is_empty = 0; break; }
+        }
+        if (is_empty) break;
+        
+        /* USTAR magic kontrolü */
+        if (memcmp(hdr->magic, "ustar", 5) != 0) break;
+        
+        int file_size = tar_octal(hdr->size, 11);
+        char type = hdr->typeflag[0];
+        
+        /* Dosya adı */
+        char name[256] = "";
+        if (hdr->prefix[0]) {
+            strcpy(name, hdr->prefix);
+            strcat(name, "/");
+        }
+        strcat(name, hdr->name);
+        
+        int name_len = strlen(name);
+        if (name_len > 0 && name[name_len - 1] == '/') {
+            name[name_len - 1] = '\0';
+        }
+        
+        /* Dizin ise oluştur */
+        if (type == '5') {
+            char dir_path[MAX_PATH_LEN];
+            if (target_dir[0]) {
+                strcpy(dir_path, target_dir);
+                if (dir_path[strlen(dir_path) - 1] != '/') strcat(dir_path, "/");
+            } else {
+                dir_path[0] = '\0';
+            }
+            strcat(dir_path, name);
+            fs_create_dir(&g_fs, dir_path);
+            offset += 512;
+            /* Dizin verisi atla */
+            int data_blocks = (file_size + 511) / 512;
+            offset += data_blocks * 512;
+            continue;
+        }
+        
+        /* Dosya ise kaydet */
+        if (type == '0' || type == '\0') {
+            char full_path[MAX_PATH_LEN];
+            if (target_dir[0]) {
+                strcpy(full_path, target_dir);
+                if (full_path[strlen(full_path) - 1] != '/') strcat(full_path, "/");
+            } else {
+                full_path[0] = '\0';
+            }
+            strcat(full_path, name);
+            
+            /* Üst dizinleri oluştur */
+            char parent[MAX_PATH_LEN];
+            fs_get_parent_path(full_path, parent);
+            if (parent[0] && strcmp(parent, "/") != 0) {
+                fs_create_dir(&g_fs, parent);
+            }
+            
+            if (file_size > 0 && offset + 512 + file_size <= tar_size) {
+                fs_create_file(&g_fs, full_path, tar_data + offset + 512, file_size);
+                file_count++;
+            }
+        }
+        
+        offset += 512;
+        int data_blocks = (file_size + 511) / 512;
+        offset += data_blocks * 512;
+    }
+    
+    return file_count;
+}
+
+static int cmd_untar(int argc, char** argv) {
+    if (argc < 2) {
+        shell_print("kullanim: untar <dosya.tar> [hedef_dizin]", 12);
+        shell_newline();
+        shell_print("  .tar, .tar.gz dosyalarini cikarir", 15);
+        shell_newline();
+        return -1;
+    }
+    
+    /* TAR dosyasını oku */
+    char tar_path[MAX_PATH_LEN];
+    fs_resolve_path(g_shell.cwd, argv[1], tar_path);
+    
+    static char tar_buf[65536]; /* 64KB max */
+    int tar_size = fs_read_file(&g_fs, tar_path, tar_buf, sizeof(tar_buf) - 1);
+    
+    if (tar_size < 0) {
+        shell_print("untar: dosya bulunamadi: ", 12);
+        shell_print(argv[1], 12);
+        shell_newline();
+        return -1;
+    }
+    
+    tar_buf[tar_size] = '\0';
+    
+    /* GZIP kontrolü (0x1f 0x8b) */
+    if (tar_size >= 2 && (unsigned char)tar_buf[0] == 0x1f && (unsigned char)tar_buf[1] == 0x8b) {
+        shell_print("untar: gzip sikistirilmis dosya tespit edildi", 14);
+        shell_newline();
+        shell_print("untar: su anlik sadece sikistirilmamis .tar dosyalari destekleniyor", 12);
+        shell_newline();
+        return -1;
+    }
+    
+    /* TAR header kontrolü */
+    if (tar_size < 512) {
+        shell_print("untar: dosya cok kucuk veya gecersiz", 12);
+        shell_newline();
+        return -1;
+    }
+    
+    /* USTAR magic kontrolü */
+    tar_ustar_t *hdr = (tar_ustar_t*)tar_buf;
+    if (memcmp(hdr->magic, "ustar", 5) != 0) {
+        shell_print("untar: gecerli bir TAR dosyasi degil", 12);
+        shell_newline();
+        return -1;
+    }
+    
+    /* Hedef dizin */
+    char target_dir[MAX_PATH_LEN] = "";
+    if (argc > 2) {
+        fs_resolve_path(g_shell.cwd, argv[2], target_dir);
+        fs_create_dir(&g_fs, target_dir);
+    }
+    
+    int count = tar_extract_file(tar_buf, tar_size, target_dir);
+    
+    shell_print("untar: ", 10);
+    shell_print_int(count, 10);
+    shell_print(" dosya cikarildi", 10);
+    shell_newline();
+    
     return 0;
 }
 

@@ -8,15 +8,20 @@ typedef struct {
 } gop_info_t;
 
 void keyboard_init(void *st);
+void network_init(void *st);
+void io_init(void *st, void *rs);
 void kernel_main(gop_info_t *gop_info);
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
-    /* BS ve Print yerine direkt SystemTable kullan */
     EFI_BOOT_SERVICES *bs = SystemTable->BootServices;
+
+    /* IO başlat (reboot/halt için) */
+    io_init(SystemTable, SystemTable->RuntimeServices);
 
     /* Klavyeyi başlat */
     keyboard_init(SystemTable);
-    extern void network_init(void *st);
+
+    /* Ağ başlat */
     network_init(SystemTable);
 
     /* GOP'u bul */

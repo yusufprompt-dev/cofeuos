@@ -9,6 +9,9 @@
 
 #include "types.h"
 
+/* IO başlatma (UEFI SystemTable + RuntimeServices) */
+void io_init(void *st, void *rs);
+
 /* Donanım I/O port işlemleri */
 void outb(u16 port, u8 data);
 void outw(u16 port, u16 data);
@@ -20,6 +23,10 @@ u32 inl(u16 port);
 
 /* Gecikme fonksiyonları */
 void io_wait(void);
+
+/* UEFI sistem kontrolleri */
+void uefi_reset_system(void);
+void uefi_shutdown(void);
 
 /* Basit yazdırma fonksiyonları */
 void printf(const char* format, ...);
