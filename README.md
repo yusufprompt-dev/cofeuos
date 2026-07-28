@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # CofeuOS
 
 CofeuOS, sıfırdan yazılmış minimal bir UEFI işletim sistemidir. GOP (Graphics Output Protocol) kullanarak modern UEFI sistemlerde çalışır.
@@ -94,3 +95,7 @@ Bilgisayarı USB'den boot et.
 ## Lisans
 
 GNU GPL v3
+=======
+# cofeuos
+CofeuOS Again!
+>>>>>>> d3c6de0e60ed61c3905fb3033df4ba60a690777b
