@@ -148,12 +148,25 @@ iso: BOOTX64.EFI
 	@echo ">>> ISO oluşturuluyor..."
 	@mkdir -p iso/EFI/BOOT
 	@cp BOOTX64.EFI iso/EFI/BOOT/
+	@dd if=/dev/zero of=iso/efiboot.img bs=1M count=4 2>/dev/null
+	@mkfs.vfat iso/efiboot.img >/dev/null
+	@mmd -i iso/efiboot.img ::EFI
+	@mmd -i iso/efiboot.img ::EFI/BOOT
+	@mcopy -i iso/efiboot.img BOOTX64.EFI ::EFI/BOOT/BOOTX64.EFI
 	xorriso -as mkisofs \
-	  -e EFI/BOOT/BOOTX64.EFI \
-	  -no-emul-boot -boot-load-size 4 -boot-info-table \
 	  -o CofeuOS-x86_64.iso \
+	  -eltorito-alt-boot \
+	  -e efiboot.img \
+	  -no-emul-boot \
+	  -isohybrid-gpt-basdat \
 	  iso
 	@echo ">>> $(ISO_NAME) hazır!"
+runiso: iso OVMF_VARS_local.fd
+	qemu-system-x86_64 \
+	  -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+	  -drive if=pflash,format=raw,file=$(CURDIR)/OVMF_VARS_local.fd \
+	  -cdrom $(ISO_NAME) \
+	  -m 256M
 # MicroPython
 MP_DIR = src/micropython_embed
 MP_SRCS = $(shell find $(MP_DIR) -name "*.c")
