@@ -167,6 +167,9 @@ runiso: iso OVMF_VARS_local.fd
 	  -drive if=pflash,format=raw,file=$(CURDIR)/OVMF_VARS_local.fd \
 	  -cdrom $(ISO_NAME) \
 	  -m 256M
+OVMF_VARS_local.fd:
+	cp /usr/share/OVMF/OVMF_VARS_4M.fd $@
+
 # MicroPython
 MP_DIR = src/micropython_embed
 MP_SRCS = $(shell find $(MP_DIR) -name "*.c")
