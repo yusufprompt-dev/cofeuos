@@ -43,4 +43,8 @@ void video_print(const char *str, int x, int y, u8 color);
 void video_scroll(void);
 void video_scroll_rect(int x, int y, int w, int h);
 
+u32  video_get_pixel(int x, int y);
+void video_draw_cursor(int cx, int cy);
+void video_restore_cursor(int cx, int cy);
+
 #endif

@@ -8,6 +8,7 @@ typedef struct {
 } gop_info_t;
 
 void keyboard_init(void *st);
+void mouse_init(void *st);
 void network_init(void *st);
 void io_init(void *st, void *rs);
 void kernel_main(gop_info_t *gop_info);
@@ -20,6 +21,9 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
 
     /* Klavyeyi başlat */
     keyboard_init(SystemTable);
+
+    /* Fareyi başlat */
+    mouse_init(SystemTable);
 
     /* Ağ başlat */
     network_init(SystemTable);

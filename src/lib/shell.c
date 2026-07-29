@@ -72,7 +72,51 @@ static int cmd_nslookup(int argc, char** argv);
 
 int shell_execute(const char* cmd);
 
+static desktop_window_t *g_gui_term_target = NULL;
+
+static void gui_term_print_char(desktop_window_t *win, char c, u8 color) {
+    if (!win) return;
+    if (c == '\n') {
+        win->term_cx = 0;
+        win->term_cy++;
+        if (win->term_cy >= GUI_TERM_ROWS) {
+            for (int r = 0; r < GUI_TERM_ROWS - 1; r++) {
+                memcpy(win->term_screen[r], win->term_screen[r + 1], GUI_TERM_COLS + 1);
+                memcpy(win->term_colors[r], win->term_colors[r + 1], GUI_TERM_COLS + 1);
+            }
+            memset(win->term_screen[GUI_TERM_ROWS - 1], 0, GUI_TERM_COLS + 1);
+            memset(win->term_colors[GUI_TERM_ROWS - 1], 15, GUI_TERM_COLS + 1);
+            win->term_cy = GUI_TERM_ROWS - 1;
+        }
+        return;
+    }
+    if (c == '\r') return;
+    if (win->term_cx >= GUI_TERM_COLS) {
+        win->term_cx = 0;
+        win->term_cy++;
+        if (win->term_cy >= GUI_TERM_ROWS) {
+            for (int r = 0; r < GUI_TERM_ROWS - 1; r++) {
+                memcpy(win->term_screen[r], win->term_screen[r + 1], GUI_TERM_COLS + 1);
+                memcpy(win->term_colors[r], win->term_colors[r + 1], GUI_TERM_COLS + 1);
+            }
+            memset(win->term_screen[GUI_TERM_ROWS - 1], 0, GUI_TERM_COLS + 1);
+            memset(win->term_colors[GUI_TERM_ROWS - 1], 15, GUI_TERM_COLS + 1);
+            win->term_cy = GUI_TERM_ROWS - 1;
+        }
+    }
+    win->term_screen[win->term_cy][win->term_cx] = c;
+    win->term_colors[win->term_cy][win->term_cx] = color;
+    win->term_cx++;
+}
+
 static void shell_print(const char* str, u8 color) {
+    if (g_gui_term_target) {
+        for (const char* p = str; *p; p++) {
+            gui_term_print_char(g_gui_term_target, *p, color);
+        }
+        return;
+    }
+
     int x = cursor_x;
     int y = cursor_y;
 
@@ -104,6 +148,10 @@ static void shell_print(const char* str, u8 color) {
 }
 
 static void shell_newline(void) {
+    if (g_gui_term_target) {
+        gui_term_print_char(g_gui_term_target, '\n', 15);
+        return;
+    }
     cursor_x = 5;
     cursor_y += LINE_HEIGHT;
     if (cursor_y > SCREEN_HEIGHT - LINE_HEIGHT) {
@@ -266,6 +314,14 @@ static int cmd_whoami(int argc, char** argv) { shell_print(g_shell.user, 10); re
 static int cmd_uname(int argc, char** argv) { shell_print("cofeuOS v3.0 x86_64 UEFI", 14); return 0; }
 
 static int cmd_clear(int argc, char** argv) {
+    (void)argc; (void)argv;
+    if (g_gui_term_target) {
+        memset(g_gui_term_target->term_screen, 0, sizeof(g_gui_term_target->term_screen));
+        memset(g_gui_term_target->term_colors, 0, sizeof(g_gui_term_target->term_colors));
+        g_gui_term_target->term_cx = 0;
+        g_gui_term_target->term_cy = 0;
+        return 0;
+    }
     video_clear(0); cursor_x = 5; cursor_y = 30; return 0;
 }
 
@@ -1555,85 +1611,427 @@ static int cmd_untar(int argc, char** argv) {
     return 0;
 }
 
-static void desktop_text(const char* str, int x, int y, u8 color) { video_print(str, x, y, color); }
+/* ─── COFEUDE DESKTOP GUI V2 (Mouse Cursor, Window Manager, Window Terminal) ─── */
 
-static void desktop_draw_window(int x, int y, int w, int h, const char* title, u8 body_color) {
-    video_fill_rect(x, y, w, h, body_color);
-    video_fill_rect(x, y, w, 14, 1);
-    video_draw_rect(x, y, w, h, 15);
-    desktop_text(title, x + 5, y + 3, 15);
-    video_fill_rect(x + w - 13, y + 3, 8, 8, 12);
+static desktop_window_t g_windows[MAX_GUI_WINDOWS];
+static int g_window_count = 0;
+static int g_active_win = -1;
+static int g_drag_win = -1;
+static int g_drag_off_x = 0;
+static int g_drag_off_y = 0;
+
+static void desktop_open_program(int type) {
+    for (int i = 0; i < g_window_count; i++) {
+        if (g_windows[i].active && g_windows[i].type == type) {
+            g_active_win = i;
+            return;
+        }
+    }
+
+    int slot = -1;
+    for (int i = 0; i < g_window_count; i++) {
+        if (!g_windows[i].active) { slot = i; break; }
+    }
+    if (slot == -1 && g_window_count < MAX_GUI_WINDOWS) {
+        slot = g_window_count++;
+    }
+    if (slot == -1) return;
+
+    desktop_window_t *w = &g_windows[slot];
+    memset(w, 0, sizeof(desktop_window_t));
+    w->id = slot + 1;
+    w->active = 1;
+    w->type = type;
+
+    if (type == WINDOW_TYPE_TERMINAL) {
+        strcpy(w->title, "cofeuTerminal");
+        w->x = 95; w->y = 25; w->w = 530; w->h = 340;
+        w->term_cx = 0; w->term_cy = 0;
+        w->input_pos = 0; w->input_buf[0] = '\0';
+        g_gui_term_target = w;
+        shell_print("cofeuOS GUI Terminal v3.0\n", 14);
+        shell_print("Komut yazabilirsiniz (orn: ls, neofetch, ping, python)\n", 11);
+        shell_print("--------------------------------------------------\n", 7);
+        g_gui_term_target = NULL;
+    } else if (type == WINDOW_TYPE_FILES) {
+        strcpy(w->title, "Dosya Yoneticisi");
+        w->x = 110; w->y = 45; w->w = 480; w->h = 290;
+    } else if (type == WINDOW_TYPE_NOTES) {
+        strcpy(w->title, "Not Defteri");
+        w->x = 125; w->y = 65; w->w = 440; w->h = 270;
+    } else if (type == WINDOW_TYPE_INFO) {
+        strcpy(w->title, "Sistem Bilgisi");
+        w->x = 140; w->y = 50; w->w = 400; w->h = 260;
+    } else if (type == WINDOW_TYPE_CALC) {
+        strcpy(w->title, "Hesap Makinesi");
+        w->x = 160; w->y = 70; w->w = 340; w->h = 250;
+    }
+
+    g_active_win = slot;
 }
 
-static void desktop_draw_base(const char* status) {
-    video_clear(1);
-    video_fill_rect(0, 0, SCREEN_WIDTH, 18, 9);
-    video_fill_rect(0, SCREEN_HEIGHT - 20, SCREEN_WIDTH, 20, 8);
-    desktop_text("cofeuDE", 6, 5, 15);
-    desktop_text("Desktop", SCREEN_WIDTH - 70, 5, 15);
-    video_fill_rect(10, 28, 34, 34, 3);
-    video_draw_rect(10, 28, 34, 34, 15);
-    desktop_text("Files", 8, 66, 15);
-    video_fill_rect(58, 28, 34, 34, 5);
-    video_draw_rect(58, 28, 34, 34, 15);
-    desktop_text("Notes", 55, 66, 15);
-    video_fill_rect(106, 28, 34, 34, 6);
-    video_draw_rect(106, 28, 34, 34, 15);
-    desktop_text("Info", 108, 66, 15);
-    desktop_draw_window(152, 34, SCREEN_WIDTH - 164, SCREEN_HEIGHT - 74, "Welcome", 7);
-    desktop_text("apps: files notes info term exit", 160, 54, 0);
-    desktop_text(status, 6, SCREEN_HEIGHT - 15, 15);
+static void gui_term_print_string(desktop_window_t *w, const char *str, u8 color) {
+    if (!w) return;
+    for (const char *p = str; *p; p++) {
+        gui_term_print_char(w, *p, color);
+    }
 }
 
-static void desktop_show_files(void) {
-    char buf[512];
-    int sz = fs_list_dir(&g_fs, g_shell.cwd, buf, sizeof(buf));
-    desktop_draw_base("Files app");
-    desktop_draw_window(48, 82, SCREEN_WIDTH - 96, 72, "Files", 7);
-    desktop_text(g_shell.cwd, 56, 104, 1);
-    desktop_text(sz >= 0 && buf[0] ? buf : "(empty)", 56, 120, 0);
-}
+static void desktop_draw_single_window(desktop_window_t *w, int is_focused) {
+    if (!w || !w->active) return;
 
-static void desktop_show_notes(void) {
-    char note[256];
-    int sz = fs_read_file(&g_fs, "/home/notes.txt", note, sizeof(note) - 1);
-    desktop_draw_base("Notes app");
-    desktop_draw_window(38, 82, SCREEN_WIDTH - 76, 76, "Notes", 7);
-    if (sz >= 0) { note[sz] = '\0'; desktop_text(note, 46, 104, 0); }
-    else { desktop_text("Henuz not yok. write /home/notes.txt ile yaz.", 46, 104, 0); }
-}
+    /* Başlık Çubuğu */
+    u8 title_bg = is_focused ? 9 : 8;
+    video_fill_rect(w->x, w->y, w->w, 22, title_bg);
+    video_print(w->title, w->x + 10, w->y + 3, 15);
 
-static void desktop_show_info(void) {
-    desktop_draw_base("Sistem bilgisi");
-    desktop_draw_window(48, 82, SCREEN_WIDTH - 96, 84, "System", 7);
-    desktop_text("cofeuOS v3.0 UEFI", 58, 104, 0);
-    desktop_text("Kernel: x86_64 GOP", 58, 118, 0);
-    desktop_text("Python: MicroPython embed", 58, 132, 0);
-    desktop_text("Shell: cofeu shell + cofeuDE", 58, 146, 0);
+    /* Kapatma [X] Butonu */
+    int btn_x = w->x + w->w - 20;
+    int btn_y = w->y + 3;
+    video_fill_rect(btn_x, btn_y, 16, 16, 12);
+    video_draw_char('X', btn_x + 4, btn_y, 15);
+
+    /* Gövde Alanı */
+    video_fill_rect(w->x, w->y + 22, w->w, w->h - 22, 7);
+    video_draw_rect(w->x, w->y, w->w, w->h, 15);
+
+    /* İçerik */
+    if (w->type == WINDOW_TYPE_TERMINAL) {
+        /* Terminal İç Siyah Ekran */
+        video_fill_rect(w->x + 6, w->y + 26, w->w - 12, w->h - 32, 0);
+
+        /* Satırları Yazdır (18px satır yüksekliği) */
+        int start_y = w->y + 28;
+        for (int r = 0; r < GUI_TERM_ROWS; r++) {
+            int line_y = start_y + r * 18;
+            if (line_y + 18 > w->y + w->h - 30) break;
+
+            for (int c = 0; c < GUI_TERM_COLS; c++) {
+                char ch = w->term_screen[r][c];
+                u8 col = w->term_colors[r][c] ? w->term_colors[r][c] : 15;
+                if (ch && ch >= 32) {
+                    video_draw_char(ch, w->x + 10 + c * 8, line_y, col);
+                }
+            }
+        }
+
+        /* Aktif Prompt Satırı */
+        int prompt_y = start_y + w->term_cy * 18;
+        if (prompt_y + 18 <= w->y + w->h - 28) {
+            int px = w->x + 10;
+            video_print(g_shell.user, px, prompt_y, 10); px += video_text_width(g_shell.user);
+            video_print("@cofeu # ", px, prompt_y, 14); px += video_text_width("@cofeu # ");
+            video_print(w->input_buf, px, prompt_y, 15); px += video_text_width(w->input_buf);
+            if (is_focused) {
+                video_draw_char('_', px, prompt_y, 11);
+            }
+        }
+    } else if (w->type == WINDOW_TYPE_FILES) {
+        video_print("Dizin: ", w->x + 12, w->y + 32, 0);
+        video_print(g_shell.cwd, w->x + 65, w->y + 32, 1);
+        video_fill_rect(w->x + 12, w->y + 50, w->w - 24, 1, 8);
+
+        char buf[512];
+        int sz = fs_list_dir(&g_fs, g_shell.cwd, buf, sizeof(buf));
+        if (sz >= 0 && buf[0]) {
+            video_print(buf, w->x + 16, w->y + 60, 0);
+        } else {
+            video_print("(Dizin bos)", w->x + 16, w->y + 60, 8);
+        }
+    } else if (w->type == WINDOW_TYPE_NOTES) {
+        char note[256];
+        int sz = fs_read_file(&g_fs, "/home/notes.txt", note, sizeof(note) - 1);
+        video_print("Dosya: /home/notes.txt", w->x + 12, w->y + 32, 1);
+        video_fill_rect(w->x + 12, w->y + 50, w->w - 24, 1, 8);
+        if (sz >= 0) {
+            note[sz] = '\0';
+            video_print(note, w->x + 16, w->y + 60, 0);
+        } else {
+            video_print("Not bulunamadi. Terminalden write ile ekleyebilirsiniz.", w->x + 16, w->y + 60, 0);
+        }
+    } else if (w->type == WINDOW_TYPE_INFO) {
+        video_print("cofeuOS v3.0 Desktop Edition", w->x + 15, w->y + 32, 9);
+        video_print("----------------------------", w->x + 15, w->y + 48, 8);
+        video_print("Mimar: x86_64 UEFI GOP", w->x + 15, w->y + 66, 0);
+        video_print("GUI: cofeuDE v2 (Mouse + Window Manager)", w->x + 15, w->y + 84, 0);
+        video_print("Scripting: MicroPython Embed", w->x + 15, w->y + 102, 0);
+        video_print("Bellek: 16MB Arena Allocator", w->x + 15, w->y + 120, 0);
+        video_print("Ag Katmani: DHCP + TCP/IP + HTTP", w->x + 15, w->y + 138, 0);
+    } else if (w->type == WINDOW_TYPE_CALC) {
+        video_print("cofeuDE Mini Hesap Makinesi", w->x + 15, w->y + 32, 1);
+        video_fill_rect(w->x + 15, w->y + 54, w->w - 30, 32, 0);
+        video_print("128 + 256 = 384", w->x + 25, w->y + 62, 10);
+        video_print("Komut satirindan 'calc <a> + <b>' kullanabilirsiniz.", w->x + 15, w->y + 105, 0);
+    }
 }
 
 static int cmd_desktop(int argc, char** argv) {
-    char input[64];
+    (void)argc; (void)argv;
+
     fs_create_dir(&g_fs, "/home");
     if (!fs_file_exists(&g_fs, "/home/notes.txt"))
-        fs_create_file(&g_fs, "/home/notes.txt", "cofeuDE'ye hosgeldiniz.", 23);
-    desktop_draw_base("Hazir");
+        fs_create_file(&g_fs, "/home/notes.txt", "cofeuDE Masaustune Hosgeldiniz!", 28);
+
+    /* Başlangıçta Terminal Penceresini Aç */
+    desktop_open_program(WINDOW_TYPE_TERMINAL);
+
+    int mx = SCREEN_WIDTH / 2;
+    int my = SCREEN_HEIGHT / 2;
+    int prev_mx = -1;
+    int prev_my = -1;
+    int start_menu_open = 0;
+    int prev_left_btn = 0;
+    int needs_redraw = 1;
+
+    video_clear(1);
+
     while (1) {
-        cursor_x = 8; cursor_y = SCREEN_HEIGHT - 15;
-        video_fill_rect(0, SCREEN_HEIGHT - 20, SCREEN_WIDTH, 20, 8);
-        desktop_text("desktop> ", 6, SCREEN_HEIGHT - 15, 15);
-        cursor_x = 78;
-        main_get_input(input, sizeof(input));
-        if (strcmp(input, "exit") == 0 || strcmp(input, "term") == 0) {
-            video_clear(0); cursor_x = 5; cursor_y = 30;
-            shell_print("cofeuDE'den cikild.", 10); shell_newline();
-            return 0;
+        /* 1. Fare verilerini oku */
+        mouse_state_t ms;
+        mouse_get_state(&ms);
+
+        int moved = 0;
+        if (ms.dx != 0 || ms.dy != 0) {
+            mx += ms.dx;
+            my += ms.dy;
+            moved = 1;
         }
-        if (strcmp(input, "files") == 0) { desktop_show_files(); continue; }
-        if (strcmp(input, "notes") == 0) { desktop_show_notes(); continue; }
-        if (strcmp(input, "info")  == 0) { desktop_show_info();  continue; }
-        if (strcmp(input, "clear") == 0 || strcmp(input, "home") == 0) { desktop_draw_base("Hazir"); continue; }
-        desktop_draw_base("Bilinmeyen komut. files notes info term exit");
+
+        /* 2. Klavye Girişi ve Ok Tuşları ile İmleç Kontrolü */
+        key_event_t ev = try_read_key_event();
+        if (ev.scan_code != 0 || ev.key != 0) {
+            /* Klavye Ok Tuşları ile Fare İmleci Hareketi */
+            if (ev.scan_code == 1) { my -= 12; moved = 1; }      /* Up */
+            else if (ev.scan_code == 2) { my += 12; moved = 1; }  /* Down */
+            else if (ev.scan_code == 3) { mx += 12; moved = 1; }  /* Right */
+            else if (ev.scan_code == 4) { mx -= 12; moved = 1; }  /* Left */
+
+            /* Aktif Pencereye Klavye Girişi */
+            if (ev.key != 0 && g_active_win >= 0 && g_active_win < g_window_count && g_windows[g_active_win].active) {
+                desktop_window_t *w = &g_windows[g_active_win];
+
+                if (w->type == WINDOW_TYPE_TERMINAL) {
+                    if (ev.key == '\n') {
+                        /* Prompt ve Komutu Ekrana Yazdır */
+                        gui_term_print_string(w, g_shell.user, 10);
+                        gui_term_print_string(w, "@cofeu # ", 14);
+                        gui_term_print_string(w, w->input_buf, 15);
+                        gui_term_print_char(w, '\n', 15);
+
+                        if (w->input_pos > 0) {
+                            w->input_buf[w->input_pos] = '\0';
+
+                            /* Çıktıyı bu pencereye yönlendir */
+                            g_gui_term_target = w;
+                            shell_execute(w->input_buf);
+                            g_gui_term_target = NULL;
+                        }
+                        w->input_pos = 0;
+                        w->input_buf[0] = '\0';
+                        needs_redraw = 1;
+                    } else if (ev.key == '\b') {
+                        if (w->input_pos > 0) {
+                            w->input_pos--;
+                            w->input_buf[w->input_pos] = '\0';
+                            needs_redraw = 1;
+                        }
+                    } else if (ev.key >= 32 && w->input_pos < (int)sizeof(w->input_buf) - 1) {
+                        w->input_buf[w->input_pos++] = ev.key;
+                        w->input_buf[w->input_pos] = '\0';
+                        needs_redraw = 1;
+                    }
+                }
+            }
+        }
+
+        /* Ekran Sınırlarını Koruma */
+        if (mx < 0) mx = 0;
+        if (mx >= SCREEN_WIDTH) mx = SCREEN_WIDTH - 1;
+        if (my < 0) my = 0;
+        if (my >= SCREEN_HEIGHT) my = SCREEN_HEIGHT - 1;
+
+        /* Pencere Sürükleme Mantığı */
+        if (ms.left_btn && g_drag_win >= 0 && g_drag_win < g_window_count && g_windows[g_drag_win].active) {
+            desktop_window_t *w = &g_windows[g_drag_win];
+            w->x = mx - g_drag_off_x;
+            w->y = my - g_drag_off_y;
+            if (w->x < 0) w->x = 0;
+            if (w->y < 0) w->y = 0;
+            if (w->x + w->w > SCREEN_WIDTH) w->x = SCREEN_WIDTH - w->w;
+            if (w->y + w->h > SCREEN_HEIGHT - 26) w->y = SCREEN_HEIGHT - 26 - w->h;
+            needs_redraw = 1;
+        } else if (!ms.left_btn) {
+            g_drag_win = -1;
+        }
+
+        int click = (ms.left_btn && !prev_left_btn);
+        prev_left_btn = ms.left_btn;
+
+        if (click) {
+            needs_redraw = 1;
+
+            /* Başlat Butonu Tıklaması */
+            if (mx >= 4 && mx <= 79 && my >= SCREEN_HEIGHT - 26) {
+                start_menu_open = !start_menu_open;
+            }
+            /* Başlat Menüsü Elemanları Tıklaması */
+            else if (start_menu_open && mx >= 4 && mx <= 144 && my >= SCREEN_HEIGHT - 175 && my < SCREEN_HEIGHT - 26) {
+                if (my >= SCREEN_HEIGHT - 150 && my < SCREEN_HEIGHT - 130) desktop_open_program(WINDOW_TYPE_TERMINAL);
+                else if (my >= SCREEN_HEIGHT - 130 && my < SCREEN_HEIGHT - 110) desktop_open_program(WINDOW_TYPE_FILES);
+                else if (my >= SCREEN_HEIGHT - 110 && my < SCREEN_HEIGHT - 90)  desktop_open_program(WINDOW_TYPE_NOTES);
+                else if (my >= SCREEN_HEIGHT - 90  && my < SCREEN_HEIGHT - 70)  desktop_open_program(WINDOW_TYPE_INFO);
+                else if (my >= SCREEN_HEIGHT - 70  && my < SCREEN_HEIGHT - 50)  desktop_open_program(WINDOW_TYPE_CALC);
+                else if (my >= SCREEN_HEIGHT - 50) {
+                    video_clear(0); cursor_x = 5; cursor_y = 30;
+                    shell_print("Masaustunden cikildi.\n", 10);
+                    return 0;
+                }
+                start_menu_open = 0;
+            }
+            else {
+                start_menu_open = 0;
+
+                int handled = 0;
+                /* Önce Aktif Pencere Etkileşimini Kontrol Et */
+                if (g_active_win >= 0 && g_active_win < g_window_count && g_windows[g_active_win].active) {
+                    desktop_window_t *w = &g_windows[g_active_win];
+                    int btn_x = w->x + w->w - 20;
+                    int btn_y = w->y + 3;
+
+                    /* Kapatma [X] Butonuna mı Basıldı? */
+                    if (mx >= btn_x && mx <= btn_x + 16 && my >= btn_y && my <= btn_y + 16) {
+                        w->active = 0;
+                        g_active_win = -1;
+                        for (int k = 0; k < g_window_count; k++) {
+                            if (g_windows[k].active) { g_active_win = k; break; }
+                        }
+                        handled = 1;
+                    }
+                    /* Başlık Çubuğuna mı Basıldı? (Sürükleme Başlat) */
+                    else if (mx >= w->x && mx <= w->x + w->w - 22 && my >= w->y && my <= w->y + 22) {
+                        g_drag_win = g_active_win;
+                        g_drag_off_x = mx - w->x;
+                        g_drag_off_y = my - w->y;
+                        handled = 1;
+                    }
+                    /* Pencere İçine mi Basıldı? */
+                    else if (mx >= w->x && mx <= w->x + w->w && my >= w->y && my <= w->y + w->h) {
+                        handled = 1;
+                    }
+                }
+
+                /* Diğer Pencereler Arasında Geçiş / Odak */
+                if (!handled) {
+                    for (int i = g_window_count - 1; i >= 0; i--) {
+                        if (g_windows[i].active) {
+                            desktop_window_t *w = &g_windows[i];
+                            int btn_x = w->x + w->w - 20;
+                            int btn_y = w->y + 3;
+                            if (mx >= btn_x && mx <= btn_x + 16 && my >= btn_y && my <= btn_y + 16) {
+                                w->active = 0;
+                                handled = 1;
+                                break;
+                            } else if (mx >= w->x && mx <= w->x + w->w && my >= w->y && my <= w->y + w->h) {
+                                g_active_win = i;
+                                g_drag_win = i;
+                                g_drag_off_x = mx - w->x;
+                                g_drag_off_y = my - w->y;
+                                handled = 1;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                /* Masaüstü İkonları Tıklaması (Sol Kenar Dikey İkonlar) */
+                if (!handled && mx >= 10 && mx <= 75) {
+                    if (my >= 20 && my <= 70) desktop_open_program(WINDOW_TYPE_TERMINAL);
+                    else if (my >= 90 && my <= 140) desktop_open_program(WINDOW_TYPE_FILES);
+                    else if (my >= 160 && my <= 210) desktop_open_program(WINDOW_TYPE_NOTES);
+                    else if (my >= 230 && my <= 280) desktop_open_program(WINDOW_TYPE_INFO);
+                    else if (my >= 300 && my <= 350) desktop_open_program(WINDOW_TYPE_CALC);
+                    else if (my >= 370 && my <= 420) {
+                        video_clear(0); cursor_x = 5; cursor_y = 30;
+                        shell_print("Masaustunden cikildi.\n", 10);
+                        return 0;
+                    }
+                }
+            }
+        }
+
+        /* 3. GÖRSEL ÇİZİM (SIFIR TİTREME / ZERO FLICKER) */
+        if (needs_redraw) {
+            video_restore_cursor(prev_mx, prev_my);
+
+            /* Arka Plan */
+            video_fill_rect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - 26, 1);
+            video_print("cofeuOS Desktop Edition", SCREEN_WIDTH - 230, 10, 3);
+
+            /* İkonlar */
+            video_fill_rect(15, 20, 56, 44, 0); video_draw_rect(15, 20, 56, 44, 15); video_print(">_", 34, 32, 10); video_print("Terminal", 11, 68, 15);
+            video_fill_rect(15, 90, 56, 44, 3); video_draw_rect(15, 90, 56, 44, 15); video_print("DIR", 30, 102, 14); video_print("Dosyalar", 11, 138, 15);
+            video_fill_rect(15, 160, 56, 44, 5); video_draw_rect(15, 160, 56, 44, 15); video_print("TXT", 30, 172, 15); video_print("Notlar", 18, 208, 15);
+            video_fill_rect(15, 230, 56, 44, 6); video_draw_rect(15, 230, 56, 44, 15); video_print("INFO", 26, 242, 15); video_print("Sistem", 18, 278, 15);
+            video_fill_rect(15, 300, 56, 44, 2); video_draw_rect(15, 300, 56, 44, 15); video_print("123", 30, 312, 15); video_print("Hesap", 20, 348, 15);
+            video_fill_rect(15, 370, 56, 44, 4); video_draw_rect(15, 370, 56, 44, 15); video_print("EXIT", 26, 382, 15); video_print("Cikis", 22, 418, 15);
+
+            /* Pencereler */
+            for (int i = 0; i < g_window_count; i++) {
+                if (i != g_active_win && g_windows[i].active) {
+                    desktop_draw_single_window(&g_windows[i], 0);
+                }
+            }
+            if (g_active_win >= 0 && g_active_win < g_window_count && g_windows[g_active_win].active) {
+                desktop_draw_single_window(&g_windows[g_active_win], 1);
+            }
+
+            /* Alt Görev Çubuğu */
+            video_fill_rect(0, SCREEN_HEIGHT - 26, SCREEN_WIDTH, 26, 8);
+            video_draw_rect(0, SCREEN_HEIGHT - 26, SCREEN_WIDTH, 26, 7);
+            video_fill_rect(4, SCREEN_HEIGHT - 23, 75, 20, start_menu_open ? 9 : 3);
+            video_draw_rect(4, SCREEN_HEIGHT - 23, 75, 20, 15);
+            video_print("cofeuOS", 10, SCREEN_HEIGHT - 19, 15);
+
+            int tab_x = 90;
+            for (int i = 0; i < g_window_count; i++) {
+                if (g_windows[i].active) {
+                    int is_act = (i == g_active_win);
+                    video_fill_rect(tab_x, SCREEN_HEIGHT - 23, 110, 20, is_act ? 9 : 7);
+                    video_draw_rect(tab_x, SCREEN_HEIGHT - 23, 110, 20, 15);
+                    video_print(g_windows[i].title, tab_x + 6, SCREEN_HEIGHT - 19, is_act ? 15 : 0);
+                    tab_x += 115;
+                }
+            }
+            video_print("GUI v2.0", SCREEN_WIDTH - 75, SCREEN_HEIGHT - 19, 15);
+
+            /* Başlat Menüsü Pop-up */
+            if (start_menu_open) {
+                video_fill_rect(4, SCREEN_HEIGHT - 175, 140, 148, 8);
+                video_draw_rect(4, SCREEN_HEIGHT - 175, 140, 148, 15);
+                video_print("  Uygulamalar", 12, SCREEN_HEIGHT - 167, 14);
+                video_fill_rect(8, SCREEN_HEIGHT - 151, 132, 1, 7);
+                video_print("[>] Terminal", 12, SCREEN_HEIGHT - 145, 15);
+                video_print("[>] Dosyalar", 12, SCREEN_HEIGHT - 125, 15);
+                video_print("[>] Notlar",   12, SCREEN_HEIGHT - 105, 15);
+                video_print("[>] Sistem",   12, SCREEN_HEIGHT - 85,  15);
+                video_print("[>] Hesap",    12, SCREEN_HEIGHT - 65,  15);
+                video_print("[X] Cikis",    12, SCREEN_HEIGHT - 45,  12);
+            }
+
+            needs_redraw = 0;
+
+            video_draw_cursor(mx, my);
+            prev_mx = mx;
+            prev_my = my;
+        } else if (moved || mx != prev_mx || my != prev_my) {
+            /* Sadece İmleç Hareketi: Tampondan Eski İmleci Temizle ve Yenisini Çiz */
+            video_restore_cursor(prev_mx, prev_my);
+            video_draw_cursor(mx, my);
+            prev_mx = mx;
+            prev_my = my;
+        }
+
+        kbd_delay(12000);
     }
 }
 
@@ -1658,3 +2056,4 @@ static int cmd_env(int argc, char** argv) {
     shell_newline();
     return 0;
 }static int cmd_sudo(int argc, char** argv) { return cmd_rodo(argc, argv); }
+

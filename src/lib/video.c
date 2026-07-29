@@ -182,3 +182,70 @@ void video_scroll_rect(int rx, int ry, int rw, int rh) {
 void video_scroll(void) {
     video_scroll_rect(0, 0, (int)gop_width, (int)gop_height);
 }
+
+/* ─── Fare İmleci (Mouse Cursor) ──────────────────────────────── */
+static u32 cursor_bg_buffer[16][16];
+static int saved_cursor_x = -1;
+static int saved_cursor_y = -1;
+
+static const u8 cursor_bitmap[12][12] = {
+    {2,0,0,0,0,0,0,0,0,0,0,0},
+    {2,2,0,0,0,0,0,0,0,0,0,0},
+    {2,1,2,0,0,0,0,0,0,0,0,0},
+    {2,1,1,2,0,0,0,0,0,0,0,0},
+    {2,1,1,1,2,0,0,0,0,0,0,0},
+    {2,1,1,1,1,2,0,0,0,0,0,0},
+    {2,1,1,1,1,1,2,0,0,0,0,0},
+    {2,1,1,1,1,1,1,2,0,0,0,0},
+    {2,1,1,1,2,2,2,2,2,0,0,0},
+    {2,1,2,1,2,0,0,0,0,0,0,0},
+    {2,2,0,2,1,2,0,0,0,0,0,0},
+    {0,0,0,0,2,2,0,0,0,0,0,0}
+};
+
+u32 video_get_pixel(int x, int y) {
+    if (x < 0 || y < 0 || (u32)x >= gop_width || (u32)y >= gop_height)
+        return 0;
+    return g_fb[(u32)y * g_pitch + (u32)x];
+}
+
+void video_restore_cursor(int cx, int cy) {
+    (void)cx; (void)cy;
+    if (saved_cursor_x < 0 || saved_cursor_y < 0) return;
+    for (int r = 0; r < 12; r++) {
+        for (int c = 0; c < 12; c++) {
+            int px = saved_cursor_x + c;
+            int py = saved_cursor_y + r;
+            if (px >= 0 && py >= 0 && (u32)px < gop_width && (u32)py < gop_height) {
+                video_put_pixel(px, py, cursor_bg_buffer[r][c]);
+            }
+        }
+    }
+    saved_cursor_x = -1;
+    saved_cursor_y = -1;
+}
+
+void video_draw_cursor(int cx, int cy) {
+    video_restore_cursor(saved_cursor_x, saved_cursor_y);
+    saved_cursor_x = cx;
+    saved_cursor_y = cy;
+
+    /* Arka planı kaydet */
+    for (int r = 0; r < 12; r++) {
+        for (int c = 0; c < 12; c++) {
+            cursor_bg_buffer[r][c] = video_get_pixel(cx + c, cy + r);
+        }
+    }
+
+    /* İmleci çiz */
+    for (int r = 0; r < 12; r++) {
+        for (int c = 0; c < 12; c++) {
+            u8 type = cursor_bitmap[r][c];
+            if (type == 1) {
+                video_put_pixel(cx + c, cy + r, 0x00FFFFFF); /* Beyaz */
+            } else if (type == 2) {
+                video_put_pixel(cx + c, cy + r, 0x00000000); /* Siyah kenarlık */
+            }
+        }
+    }
+}
