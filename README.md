@@ -1,128 +1,188 @@
-# CofeuOS
+<div align="center">
 
-CofeuOS, sıfırdan yazılmış minimal bir **UEFI işletim sistemidir**. BIOS gerektirmeden, GOP (Graphics Output Protocol) kullanarak modern UEFI sistemlerde çalışır. Unix benzeri bir kabuk (shell), basit bir dosya sistemi, gömülü bir Python yorumlayıcısı ve temel bir masaüstü ortamı (cofeuDE) içerir.
+# 🖥️ CofeuOS
 
-> **Not:** CofeuOS deneysel/eğitim amaçlı bir projedir. `date`, `uptime`, `free`, `df`, `pacman` gibi bazı komutlar gerçek sistem verisi döndürmez, sabit (mock) çıktı üretir — aşağıda ilgili bölümlerde belirtilmiştir.
+**Sıfırdan yazılmış, UEFI üzerinde çalışan minimal bir x86_64 işletim sistemi**
 
-## İçindekiler
+*Kendi kernel'i, kendi dosya sistemi, kendi shell'i, kendi masaüstü ortamı ve gömülü Python yorumlayıcısıyla.*
 
-- [Özellikler](#özellikler)
-- [Gereksinimler](#gereksinimler)
-- [Derleme](#derleme)
-- [QEMU ile Test](#qemu-ile-test)
-- [Gerçek Makineye Kurulum](#gerçek-makineye-kurulum)
-- [Giriş (Login)](#giriş-login)
-- [Shell Komutları](#shell-komutları)
-- [Ağ Kullanımı: curl, wget, ping, nslookup](#ağ-kullanımı-curl-wget-ping-nslookup)
-- [Python Yorumlayıcısı](#python-yorumlayıcısı)
-- [cofeuDE (Masaüstü)](#cofeude-masaüstü)
-- [Kısayollar](#kısayollar)
-- [Bilinen Sınırlamalar](#bilinen-sınırlamalar)
-- [Lisans](#lisans)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-UEFI%20x86__64-informational)](#)
+[![Language](https://img.shields.io/badge/language-C%20%2F%20NASM-orange)](#)
+[![Status](https://img.shields.io/badge/status-active%20development-yellow)](#)
 
-## Özellikler
+</div>
 
-- UEFI GOP desteği (BIOS gerektirmez)
-- 64-bit x86 mimarisi
-- PSF2 font desteği
-- Dahili Unix benzeri shell (50'den fazla komut)
-- Bellek içi (RAM) dosya sistemi
-- SHA256 desteği
-- Kullanıcı girişi (login) ekranı
-- Ağ desteği: `ping`, `curl`, `wget`, `ifconfig`, `nslookup`, `nettest`
-- Gömülü MicroPython yorumlayıcısı (`python` / `python3`)
-- ZIP ve TAR arşiv çıkarma (`unzip`, `untar`)
-- Basit grafik masaüstü ortamı: cofeuDE (`desktop` / `startx`)
-- Split terminal (`Ctrl+P`)
+---
 
-## Gereksinimler
+## 📖 İçindekiler
 
-- `clang`
-- `lld` (Makefile `lld-link`'i kullanır)
-- `llvm-objcopy` (genelde `llvm` paketiyle gelir)
-- `nasm`
-- `gnu-efi`
-- `python3`
-- `xorriso` (ISO oluşturmak için — `make` / `make iso` hedefleri bunu kullanır)
-- `qemu-system-x86_64` (test için)
-- `edk2-ovmf` / `ovmf` (test için, UEFI firmware imajı sağlar)
+- [Nedir Bu?](#-nedir-bu)
+- [Öne Çıkan Özellikler](#-öne-çıkan-özellikler)
+- [Mimari](#-mimari)
+- [Proje Yapısı](#-proje-yapısı)
+- [Gereksinimler](#-gereksinimler)
+- [Derleme](#-derleme)
+- [QEMU ile Test](#-qemu-ile-test)
+- [Gerçek Donanıma Kurulum](#-gerçek-donanıma-kurulum)
+- [Shell Komutları](#-shell-komutları)
+- [cofeuDE — Masaüstü Ortamı](#-cofeude--masaüstü-ortamı)
+- [Ağ Yığını](#-ağ-yığını)
+- [Klavye Kısayolları](#-klavye-kısayolları)
+- [Yol Haritası](#-yol-haritası)
+- [Katkıda Bulunma](#-katkıda-bulunma)
+- [Lisans](#-lisans)
 
-Arch Linux:
+---
+
+## 🚀 Nedir Bu?
+
+**CofeuOS**, herhangi bir BIOS/Legacy boot katmanına ya da mevcut bir çekirdeğe (Linux, vb.) dayanmadan, doğrudan **UEFI** üzerinden **GOP (Graphics Output Protocol)** kullanarak açılan, sıfırdan yazılmış bir işletim sistemi projesidir. Amaç; boot aşamasından dosya sistemine, kullanıcı girişinden ağ yığınına, komut satırından pencereli bir masaüstü ortamına kadar tüm katmanları kendi başına inşa etmektir.
+
+Proje hâlâ aktif geliştirme aşamasındadır ve bir "hobi kernel"in ötesine geçip; TCP/IP yığını, HTTP(S) istemcisi, `pacman` benzeri bir paket yöneticisi ve gömülü bir Python yorumlayıcısı gibi gerçek dünyada işe yarayan bileşenler barındırır.
+
+## ✨ Öne Çıkan Özellikler
+
+| Kategori | Açıklama |
+|---|---|
+| 🔌 **Boot** | BIOS gerektirmeyen saf **UEFI** boot, `gnu-efi` üzerinden GOP grafik çıkışı |
+| 🧠 **Çekirdek** | 64-bit x86_64 mimarisi, kendi bellek yöneticisi (`memory.c`) |
+| 🗂️ **Dosya Sistemi** | Dahili, sıfırdan yazılmış dosya sistemi (`fs.c`) — `ls`, `cd`, `mkdir`, `rm`, `cat`, `touch` |
+| 💻 **Shell** | Zengin komut kümesine sahip dahili kabuk (`shell.c`, ~2000 satır) |
+| 🖼️ **GUI** | `startx` ile açılan pencereli masaüstü ortamı **cofeuDE** |
+| 🌐 **Ağ** | Sıfırdan TCP/IP yığını: ARP, DNS, TCP, HTTP/HTTPS, `wget`, `curl`, `ping` |
+| 📦 **Paket Yönetimi** | `pacman` tarzı komutlar (`-S`, `-Sy`, `-Syu`, `-Ss`) |
+| 🐍 **Python** | Gömülü **MicroPython** yorumlayıcısı, shell içinden çalıştırılabilir |
+| 🔐 **Güvenlik** | Dahili **SHA-256** implementasyonu, kullanıcı girişi / `passwd` |
+| 🔤 **Yazı Tipi** | PSF2 ve gohufont/terminus font desteği (`gen_font.py` ile üretilir) |
+| 🪟 **Bölünmüş Terminal** | `Ctrl+P` ile ekranı ikiye bölme desteği |
+| 📝 **Editörler** | Dahili `vim` / `nano` benzeri metin editörleri |
+
+## 🏗️ Mimari
+
+```
+┌─────────────────────────────────────────────┐
+│   UEFI Firmware (OVMF / gerçek donanım)      │
+└───────────────────┬───────────────────────────┘
+                     │  boot/efi_main.c
+                     ▼
+┌─────────────────────────────────────────────┐
+│  GOP ile grafik modu + kernel'e sıçrama      │
+│  boot/boot.asm · boot/gdt.asm                │
+│  boot/kernel_entry.asm                       │
+└───────────────────┬───────────────────────────┘
+                     ▼
+┌─────────────────────────────────────────────┐
+│               CofeuOS Kernel                 │
+│  src/kernel/main.c                           │
+│  ├─ video.c      → GOP framebuffer render    │
+│  ├─ memory.c     → bellek arena yönetimi     │
+│  ├─ keyboard.c   → klavye sürücüsü           │
+│  ├─ fs.c         → dahili dosya sistemi      │
+│  ├─ string.c/io.c→ libc benzeri yardımcılar  │
+│  ├─ sha256.c     → hash implementasyonu      │
+│  ├─ network.c    → ARP/DNS/TCP/HTTP(S)       │
+│  ├─ python.c     → MicroPython köprüsü       │
+│  └─ shell.c      → kabuk + cofeuDE masaüstü  │
+└─────────────────────────────────────────────┘
+```
+
+## 📂 Proje Yapısı
+
+```
+cofeuos/
+├── boot/                    # UEFI giriş noktası ve düşük seviye asm
+│   ├── efi_main.c
+│   ├── boot.asm
+│   ├── gdt.asm
+│   └── kernel_entry.asm
+├── src/
+│   ├── kernel/main.c        # Kernel giriş noktası, login, ana döngü
+│   ├── include/              # Header dosyaları (fs, network, shell, video…)
+│   ├── lib/                  # Çekirdek modül implementasyonları
+│   │   ├── fs.c               # Dosya sistemi
+│   │   ├── shell.c            # Shell + cofeuDE GUI (en büyük modül)
+│   │   ├── network.c          # TCP/IP yığını
+│   │   ├── video.c            # GOP framebuffer sürücüsü
+│   │   ├── memory.c           # Bellek yönetimi
+│   │   ├── keyboard.c         # Klavye sürücüsü
+│   │   ├── sha256.c           # SHA-256
+│   │   ├── string.c / io.c    # Yardımcı kütüphaneler
+│   │   └── python.c           # MicroPython köprüsü
+│   ├── micropython_embed/    # Gömülü MicroPython kaynakları
+│   └── uefi_stdlib.c
+├── gnu-efi                  # gnu-efi bağımlılık referansı
+├── gen_font.py               # PSF2 font üretici script
+├── font_data.c / gohufont.h  # Üretilmiş font verisi
+├── chkstk.c                  # Stack-check yardımcı fonksiyonu (Windows target ABI için gerekli)
+├── Makefile
+├── LICENSE                   # GPL-3.0
+└── README.md
+```
+
+## ⚙️ Gereksinimler
+
+| Araç | Amaç |
+|---|---|
+| `clang` | C derleyici (Windows/EFI hedefi ile) |
+| `lld` | Bağlayıcı (`lld-link`) |
+| `nasm` | Assembly (`boot.asm`, `gdt.asm`, `kernel_entry.asm`) |
+| `gnu-efi` | EFI header'ları ve yardımcı kütüphaneler |
+| `python3` | Font üretimi (`gen_font.py`) için |
+| `qemu-system-x86_64` | Sanal ortamda test için |
+| `edk2-ovmf` | UEFI firmware emülasyonu (OVMF) için |
+
+**Arch Linux üzerinde kurulum:**
 
 ```bash
-sudo pacman -S clang lld llvm nasm python3 xorriso qemu-system-x86 edk2-ovmf
+sudo pacman -S clang lld nasm python3 qemu-system-x86 edk2-ovmf
 yay -S gnu-efi
 ```
 
-## Derleme
-
-Repoyu klonladıktan sonra proje kökünde:
+## 🔨 Derleme
 
 ```bash
-# 1. Font verisini oluştur (font_data.c bunu üretir, ilk derlemeden önce gerekli)
+# 1) Gerekliyse chkstk.o üretilir (yoksa derleme hata verir)
+make
+
+# 2) Framebuffer fontunu üret
 python3 gen_font.py
 
-# 2. chkstk nesnesini derle
-make chkstk.o
-
-# 3. Sadece EFI ikilisini derle
+# 3) UEFI çalıştırılabilir dosyasını (BOOTX64.EFI) üret
 make BOOTX64.EFI
 
-# 4. ISO imajı oluştur (varsayılan hedef, xorriso gerektirir)
-make
-# veya açıkça:
-make iso
+# 4) MicroPython nesnelerini derle (hataları filtrelemek için)
+make $(find src/micropython_embed -name "*.c" | sed 's/\.c$/.o/') 2>&1 | grep "error:" | head -10
 ```
 
-Bu adımların sonunda proje kökünde `BOOTX64.EFI` ve `CofeuOS-x86_64.iso` dosyaları oluşur.
+> 💡 **İpucu:** Derleme hedefi `x86_64-unknown-windows` PE/COFF ABI'sini kullanır (UEFI'nin gerektirdiği format), bu yüzden `clang` + `lld-link` kombinasyonu gereklidir; klasik ELF toolchain'i burada işe yaramaz.
 
-> MicroPython derlemesinde hata alırsanız, tek tek hangi dosyanın patladığını görmek için:
-> ```bash
-> make $(find src/micropython_embed -name "*.c" | sed 's/\.c$/.o/') 2>&1 | grep "error:" | head -10
-> ```
-
-Derleme çıktısını temizlemek için:
+## 🧪 QEMU ile Test
 
 ```bash
-make clean
-```
-
-## QEMU ile Test
-
-Makefile bunu otomatikleştiren hazır hedefler içeriyor — manuel disk imajı hazırlamanıza gerek yok:
-
-```bash
-make run
-```
-
-Bu komut `BOOTX64.EFI`'yi derler, 64MB'lık bir FAT32 disk imajı (`uefi-disk.img`) oluşturur, `sudo` ile mount edip EFI ikilisini `EFI/BOOT/` altına kopyalar ve QEMU'yu ağ desteğiyle (`e1000` NIC, kullanıcı modu ağ) başlatır.
-
-**Önemli:** `make run` hedefi OVMF firmware'ini `/usr/share/ovmf/OVMF.fd` yolunda arar. Dağıtımınıza göre bu yol farklı olabilir (örn. Arch'ta `edk2-ovmf` paketiyle genelde `/usr/share/edk2-ovmf/x64/OVMF.4m.fd` veya benzeri bir yola kurulur). Yol sizde farklıysa `Makefile` içindeki `run` hedefindeki `-bios` satırını kendi OVMF yolunuza göre güncelleyin.
-
-Manuel olarak aynı işlemi yapmak isterseniz:
-
-```bash
+# 64MB'lık FAT32 disk imajı oluştur
 dd if=/dev/zero of=uefi-disk.img bs=1M count=64
 mkfs.fat -F 32 uefi-disk.img
+
+# EFI dosya sistemini hazırla
 mkdir -p /tmp/cofeu_mnt
 sudo mount -o loop uefi-disk.img /tmp/cofeu_mnt
 sudo mkdir -p /tmp/cofeu_mnt/EFI/BOOT
 sudo cp BOOTX64.EFI /tmp/cofeu_mnt/EFI/BOOT/
 sudo umount /tmp/cofeu_mnt
 
+# OVMF ile boot et
 qemu-system-x86_64 \
-  -bios /usr/share/ovmf/OVMF.fd \
+  -bios /usr/share/edk2/x64/OVMF.4m.fd \
   -drive format=raw,file=uefi-disk.img \
-  -m 256M \
-  -netdev user,id=net0 -device e1000,netdev=net0
+  -m 256M
 ```
 
-`-netdev user,...` satırı QEMU'nun kullanıcı modu (SLIRP) ağını etkinleştirir; bu, `curl`/`wget`/`ping`/`nslookup` komutlarının çalışması için gereklidir (bkz. [Ağ Kullanımı](#ağ-kullanımı-curl-wget-ping-nslookup)).
+## 💾 Gerçek Donanıma Kurulum
 
-## Gerçek Makineye Kurulum
+> ⚠️ Aşağıdaki komutlar hedef USB sürücüsünün **tamamen sıfırlanmasına** neden olur. Doğru cihaz yolunu (`/dev/sdX1`) seçtiğinizden emin olun.
 
 ```bash
-# USB'yi hazırla (X harfini kendi USB aygıtınızla değiştirin, örn. sdb)
 sudo mkfs.fat -F 32 /dev/sdX1
 sudo mount /dev/sdX1 /mnt/usb
 sudo mkdir -p /mnt/usb/EFI/BOOT
@@ -130,188 +190,127 @@ sudo cp BOOTX64.EFI /mnt/usb/EFI/BOOT/
 sudo umount /mnt/usb
 ```
 
-Bilgisayarı USB'den (UEFI modunda) boot edin.
+Ardından bilgisayarı UEFI boot menüsünden USB'yi seçerek başlatın.
 
-> ⚠️ Bu adımlar hedef diski biçimlendirir. Yanlış aygıt yolu (`/dev/sdX1`) kullanmak veri kaybına yol açabilir — `lsblk` ile doğru USB aygıtını doğrulayın.
+## 🖥️ Shell Komutları
 
-## Giriş (Login)
+CofeuOS'un dahili kabuğu, klasik bir Unix shell'inin temel komutlarını ve kendine özgü birçok ek özelliği bir araya getirir.
 
-Açılışta bir kullanıcı adı/parola ekranı karşılar. Şu an gerçek bir kimlik doğrulama **yapılmaz** — girilen kullanıcı adı sadece shell içinde (`whoami`, `env`, prompt vb.) görüntülenmek üzere kaydedilir; parola alanı sadece arayüz amaçlıdır. Herhangi bir kullanıcı adı/parola ile giriş yapabilirsiniz.
-
-## Shell Komutları
-
-### Dosya ve dizin işlemleri
+### Dosya sistemi & genel
 
 | Komut | Açıklama |
 |---|---|
-| `ls [dizin]` | Dosyaları/dizinleri listeler |
-| `pwd` | Geçerli dizini gösterir |
-| `cd <dizin>` | Dizin değiştirir |
-| `mkdir <dizin>` | Dizin oluşturur |
-| `rmdir <dizin>` | Boş dizini siler |
-| `touch <dosya>` | Boş dosya oluşturur |
-| `cat <dosya>` | Dosya içeriğini gösterir |
-| `rm <dosya>` | Dosya siler |
-| `write <dosya> <metin...>` | Dosyaya metin yazar |
-| `nano <dosya>` / `vim <dosya>` | Metin editörü açar |
-
-### Arşiv
-
-| Komut | Açıklama |
-|---|---|
-| `unzip <dosya.zip> [hedef]` | ZIP dosyasını çıkarır |
-| `untar <dosya.tar> [hedef]` (takma ad: `tar`) | Sıkıştırılmamış `.tar` (USTAR) dosyasını çıkarır — `.tar.gz` şu an desteklenmiyor |
-
-### Sistem
-
-| Komut | Açıklama |
-|---|---|
-| `whoami` | Giriş yapan kullanıcıyı gösterir |
-| `uname` | Sistem/mimari bilgisi |
-| `sysinfo` | OS, kernel, video modu, bellek, dosya sistemi özeti |
-| `about` | Sürüm ve kısa açıklama |
-| `neofetch` | ASCII sistem bilgisi ekranı |
-| `date` | *(sabit değer döndürür, gerçek saat değildir)* |
-| `uptime` | *(sabit değer döndürür)* |
-| `free` | *(sabit değer döndürür)* |
-| `df` | *(sabit değer döndürür)* |
-| `ps` | *(sabit süreç listesi döndürür)* |
-| `echo <metin...>` | Metni ekrana yazar |
-| `env` | Ortam değişkenlerini gösterir (`USER`, `HOST`, `PATH`, `SHELL`) |
+| `ls` | Dizin içeriğini listeler |
+| `cd` | Dizin değiştirir |
+| `pwd` | Bulunulan dizini gösterir |
+| `mkdir` / `rmdir` | Dizin oluşturur / siler |
+| `touch` | Boş dosya oluşturur |
+| `rm` | Dosya siler |
+| `cat` | Dosya içeriğini gösterir |
+| `write` | Dosyaya içerik yazar |
+| `vim` / `nano` | Dahili metin editörleri |
+| `tar` / `untar` / `ustar` / `unzip` | Arşiv işlemleri |
+| `df` | Disk kullanımını gösterir |
 | `clear` | Ekranı temizler |
-| `reboot` | Sistemi yeniden başlatır |
-| `halt` | Sistemi kapatır |
-| `sudo <komut>` / `rodo <komut>` | Komutu (yetki kontrolü olmadan) çalıştırır |
-| `pacman -S/-Ss/-Sy/-Syu <paket>` | *(simülasyon — gerçek paket kurulumu yapmaz, sadece durum mesajı basar)* |
-| `calc <a> +|-|*|/ <b>` | Basit aritmetik hesap makinesi |
-| `apps` | Yüklü uygulamaları listeler |
-| `theme` | Tema önizlemesi gösterir |
+
+### Sistem & oturum
+
+| Komut | Açıklama |
+|---|---|
+| `whoami` / `passwd` / `sudo` | Kullanıcı ve yetki yönetimi |
+| `uname` / `sysinfo` / `neofetch` | Sistem bilgisi |
+| `ps` / `free` / `uptime` | Süreç / bellek / çalışma süresi bilgisi |
+| `env` | Ortam değişkenlerini listeler |
+| `date` | Tarih/saat gösterir |
+| `theme` | Terminal temasını değiştirir |
+| `about` / `help` | Sistem hakkında bilgi / yardım |
+| `reboot` / `halt` / `hlt` | Yeniden başlatma / kapatma |
 
 ### Ağ
 
 | Komut | Açıklama |
 |---|---|
-| `ifconfig` | MAC adresi ve atanmış IP'yi gösterir |
-| `ping <ip>` | Verilen IP'ye 4 ICMP paketi gönderir |
-| `nslookup <domain>` | Alan adını DNS ile çözer (DNS sunucu: `10.0.2.3`) |
-| `nettest` | Ağ bağlantısını test eder |
-| `curl [-v] [-o dosya] [-X POST] [-d veri] <url>` | HTTP isteği yapar |
-| `wget <url>` | Dosya indirir |
+| `ifconfig` | Ağ arayüzü bilgisini gösterir |
+| `ping` | ICMP ping testi |
+| `nettest` | Ağ yığını teşhis testi |
+| `nslookup` | DNS çözümleme |
+| `curl` / `wget` | HTTP(S) istekleri ve dosya indirme |
 
-Ayrıntılı kullanım için bkz. [Ağ Kullanımı](#ağ-kullanımı-curl-wget-ping-nslookup).
+### Paket yönetimi
+
+| Komut | Açıklama |
+|---|---|
+| `pacman -S <paket>` | Paket kurar |
+| `pacman -Ss <sorgu>` | Paket arar |
+| `pacman -Sy` | Paket veritabanını günceller |
+| `pacman -Syu` | Sistemi tamamen günceller |
 
 ### Diğer
 
 | Komut | Açıklama |
 |---|---|
-| `python` / `python3 [dosya.py]` | MicroPython REPL'i açar veya bir betik çalıştırır |
-| `desktop` / `startx` | Grafik masaüstünü (cofeuDE) açar |
-| `help` | Komut özetini gösterir |
+| `python` | Gömülü MicroPython yorumlayıcısını başlatır |
+| `calc` | Hesap makinesi |
+| `startx` | cofeuDE masaüstü ortamını başlatır |
+| `apps` | Uygulama listesini gösterir |
 
-Shell içinde her an `help` yazarak kısa bir komut özetine ulaşabilirsiniz.
+## 🪟 cofeuDE — Masaüstü Ortamı
 
-## Ağ Kullanımı: curl, wget, ping, nslookup
+`startx` komutu ile açılan **cofeuDE**, GOP framebuffer üzerine çizilen, pencere tabanlı hafif bir masaüstü ortamıdır. Aynı anda birden fazla pencere yönetebilir ve şu pencere tiplerini destekler:
 
-Ağ komutlarının çalışması için CofeuOS'un ağ bağlantısı olması gerekir — QEMU'da bu, `-netdev user,id=net0 -device e1000,netdev=net0` bayraklarıyla sağlanır (yukarıdaki `make run` bunu otomatik ekler). Gerçek donanımda ağ desteği deneyseldir.
+- 🖳 **Terminal** — tam işlevli, GUI içinde gömülü kabuk penceresi
+- 📁 **Dosyalar** — dosya sistemi gezgini
+- 📝 **Notlar** — basit not defteri
+- ℹ️ **Bilgi** — sistem bilgisi paneli
+- 🧮 **Hesap Makinesi** — GUI tabanlı `calc`
 
-### curl
+## 🌐 Ağ Yığını
 
-```
-kullanim: curl [-v] [-o dosya] <url>
-  -v        : verbose mod
-  -o dosya  : sonucu verilen dosyaya kaydet
-  varsayilan: mevcut dizinde index.html olarak kaydedilir
-  -X POST   : POST istegi gonder
-  -d veri   : POST verisi
-```
+CofeuOS, üçüncü parti bir ağ kütüphanesine dayanmadan **kendi TCP/IP yığınını** içerir:
 
-Örnekler:
+- **ARP** çözümleme ve teşhis (`arp_test`)
+- **DHCP** ile otomatik IP alma (`network_dhcp`)
+- **DNS** çözümleme (`dns_resolve`)
+- **TCP** bağlantı kurma/kapatma (`tcp_connect` / `tcp_disconnect`)
+- **HTTP GET/POST** ve **HTTPS GET** istemcisi
+- **`wget`** ile dosya indirme desteği
 
-```bash
-# Basit GET isteği, sonucu ./index.html olarak kaydeder
-curl http://10.0.2.2/
+> 🔒 Not: HTTPS istekleri, bir TLS sağlayıcısı bağlı olmadığında `NETWORK_ERR_TLS_UNAVAILABLE` hatasını döndürür — TLS katmanı henüz gömülü değildir.
 
-# Sonucu belirli bir dosyaya kaydet
-curl -o sayfa.html http://example.com/
+## ⌨️ Klavye Kısayolları
 
-# Ayrıntılı (verbose) çıktı
-curl -v http://10.0.2.2/api/status
-
-# POST isteği
-curl -X POST -d "kullanici=test&sifre=1234" http://10.0.2.2/login
-```
-
-> `curl`, hem alan adı (domain) hem de doğrudan IP adresiyle çalışır. `http://` ve `https://` önekleri ayrıştırılır (https için gerçek TLS uygulaması olmayabilir — sadece URL ayrıştırmasını etkiler).
-> QEMU kullanıcı modu ağında `10.0.2.2`, host makinenizi temsil eder; host'ta basit bir HTTP sunucusu (örn. `python3 -m http.server`) çalıştırarak `curl`/`wget`'i test edebilirsiniz.
-
-### wget
-
-```
-kullanim: wget <url>
-```
-
-```bash
-wget http://10.0.2.2/dosya.txt
-wget /ornek.txt   # host adı verilmezse varsayılan olarak 10.0.2.2 kullanılır
-```
-
-### ping
-
-```
-kullanim: ping <ip>
-```
-
-```bash
-ping 10.0.2.2
-```
-
-IP adresi doğrudan `a.b.c.d` biçiminde verilmelidir (alan adı çözümü yapılmaz — bunun için `nslookup` kullanın).
-
-### nslookup
-
-```
-kullanim: nslookup <domain>
-```
-
-```bash
-nslookup example.com
-```
-
-## Python Yorumlayıcısı
-
-CofeuOS, gömülü bir MicroPython yorumlayıcısı içerir.
-
-```bash
-python          # REPL'i açar
-python3 betik.py  # bir .py dosyasını çalıştırır
-```
-
-## cofeuDE (Masaüstü)
-
-`desktop` veya `startx` komutuyla basit bir grafik masaüstü açılır. Masaüstü kendi mini komut satırını kullanır:
-
-| Komut | Açıklama |
+| Kısayol | Etki |
 |---|---|
-| `files` | Dosya yöneticisini açar |
-| `notes` | `/home/notes.txt` içeriğini gösterir |
-| `info` | Sistem bilgisi penceresini gösterir |
-| `clear` / `home` | Ana ekrana döner |
-| `term` / `exit` | Masaüstünden çıkıp terminale döner |
+| `Ctrl + P` | Terminali ikiye böler (split view) |
+| `Ctrl + X` | Açık split'i kapatır |
 
-## Kısayollar
+## 🗺️ Yol Haritası
 
-- `Ctrl+P` — Terminali ikiye böler (split terminal)
-- `Ctrl+X` — Split'i kapatır
+- [ ] TLS/SSL desteği ile tam `https_get` implementasyonu
+- [ ] Kalıcı depolama için gerçek bir disk dosya sistemi (FAT32/ext benzeri) sürücüsü
+- [ ] cofeuDE için daha fazla yerleşik uygulama
+- [ ] Çoklu görev (multitasking) desteği
+- [ ] Genişletilmiş paket yöneticisi altyapısı (`pacman`)
 
-## Bilinen Sınırlamalar
+## 🤝 Katkıda Bulunma
 
-- Dosya sistemi tamamen **RAM üzerinde** çalışır; kalıcı disk depolaması yoktur — her yeniden başlatmada sıfırlanır.
-- `date`, `uptime`, `free`, `df`, `ps`, `pacman` komutları gerçek zamanlı/gerçek sistem verisi döndürmez; sabit (mock) çıktılar üretirler.
-- Giriş (login) ekranı gerçek bir kimlik doğrulama yapmaz.
-- `untar`, sıkıştırılmamış (`ustar`) `.tar` dosyalarını destekler; `.tar.gz` henüz desteklenmiyor.
-- `curl` için `https://` ayrıştırılır ama gerçek bir TLS/şifreleme katmanı yoktur.
-- `boot/boot.asm`, `boot/gdt.asm`, `boot/kernel_entry.asm` dosyaları repoda bulunur ancak `Makefile` içinde bu dosyaları derleyen bir hedef yoktur (kullanılmıyorlar).
+Katkılar memnuniyetle karşılanır! Bir pull request göndermeden önce:
 
-## Lisans
+1. Depoyu fork'layın ve yeni bir dal (branch) oluşturun.
+2. Değişikliklerinizi [Derleme](#-derleme) bölümündeki adımlarla yerel olarak test edin.
+3. Mümkünse QEMU üzerinde açılış testinden geçirin.
+4. Açık ve açıklayıcı bir commit mesajıyla PR gönderin.
 
-GNU GPL v3 — ayrıntılar için [LICENSE](LICENSE) dosyasına bakın.
+Hata bildirimleri ve özellik istekleri için **Issues** sekmesini kullanabilirsiniz.
+
+## 📄 Lisans
+
+Bu proje **GNU General Public License v3.0** ile lisanslanmıştır. Ayrıntılar için [LICENSE](LICENSE) dosyasına bakınız.
+
+---
+
+<div align="center">
+
+*CofeuOS — sıfırdan, meraktan ve inatla yazılmış bir işletim sistemi.* 🧡
+
+</div>
