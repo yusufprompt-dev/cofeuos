@@ -286,9 +286,9 @@ CofeuOS, üçüncü parti bir ağ kütüphanesine dayanmadan **kendi TCP/IP yı�
 
 ## 🗺️ Yol Haritası
 
-- [ ] TLS/SSL desteği ile tam `https_get` implementasyonu
+- [X] TLS/SSL desteği ile tam `https_get` implementasyonu
 - [ ] Kalıcı depolama için gerçek bir disk dosya sistemi (FAT32/ext benzeri) sürücüsü
-- [ ] cofeuDE için daha fazla yerleşik uygulama
+- [X] cofeuDE için daha fazla yerleşik uygulama
 - [ ] Çoklu görev (multitasking) desteği
 - [ ] Genişletilmiş paket yöneticisi altyapısı (`pacman`)
 
