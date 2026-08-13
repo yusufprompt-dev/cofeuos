@@ -13,13 +13,19 @@ SRC_DIR  = src
 ISO_NAME = CofeuOS-x86_64.iso
 ISO_ROOT = iso
 
+# ─── Ağ / Teşhis Bayrakları ────────────────────────────
+NETWORK_DEBUG_FLAGS ?= -DNETWORK_DEBUG
+NETWORK_CONFIG_FLAGS ?= -DNETWORK_IP0=10 -DNETWORK_IP1=0 -DNETWORK_IP2=2 -DNETWORK_IP3=15 \
+                        -DNETWORK_GATEWAY0=10 -DNETWORK_GATEWAY1=0 -DNETWORK_GATEWAY2=2 -DNETWORK_GATEWAY3=2 \
+                        -DNETWORK_DNS0=10 -DNETWORK_DNS1=0 -DNETWORK_DNS2=2 -DNETWORK_DNS3=3
+
 # ─── EFI Derleme Bayrakları ────────────────────────────
 CFLAGS_EFI = -target x86_64-unknown-windows \
              -ffreestanding -fno-stack-protector -fno-stack-check \
              -fshort-wchar -mno-red-zone \
              -Wall -Wextra \
              -I$(EFI_INC) -I$(EFI_INC)/x86_64 \
-             -DEFI_FUNCTION_WRAPPER
+             -DEFI_FUNCTION_WRAPPER $(NETWORK_DEBUG_FLAGS) $(NETWORK_CONFIG_FLAGS)
 
 # ─── Kernel Derleme Bayrakları ─────────────────────────
 CFLAGS_K = -target x86_64-unknown-windows \
@@ -29,7 +35,7 @@ CFLAGS_K = -target x86_64-unknown-windows \
            -Wall -Wextra \
            -ffunction-sections -fdata-sections \
            -I$(EFI_INC) -I$(EFI_INC)/x86_64 \
-           -DEFI_FUNCTION_WRAPPER
+           -DEFI_FUNCTION_WRAPPER $(NETWORK_DEBUG_FLAGS) $(NETWORK_CONFIG_FLAGS)
 
 # ─── Linker Bayrakları ─────────────────────────────────
 LDFLAGS = -subsystem:efi_application \
@@ -46,10 +52,17 @@ OBJS = $(BOOT_DIR)/efi_main.o \
        $(SRC_DIR)/lib/memory.o \
        $(SRC_DIR)/lib/sha256.o \
        $(SRC_DIR)/lib/fs.o \
+       $(SRC_DIR)/lib/session.o \
        $(SRC_DIR)/lib/shell.o \
        $(SRC_DIR)/lib/python.o \
        $(SRC_DIR)/lib/keyboard.o \
        $(SRC_DIR)/lib/network.o \
+       $(SRC_DIR)/lib/aes.o \
+       $(SRC_DIR)/lib/rsa.o \
+       $(SRC_DIR)/lib/tls_prf.o \
+       $(SRC_DIR)/lib/tls_record.o \
+       $(SRC_DIR)/lib/tls_handshake.o \
+       $(SRC_DIR)/lib/tls_client.o \
        font.o
 
 # ─── Hedefler ──────────────────────────────────────────
@@ -98,6 +111,9 @@ $(SRC_DIR)/lib/sha256.o: $(SRC_DIR)/lib/sha256.c
 $(SRC_DIR)/lib/fs.o: $(SRC_DIR)/lib/fs.c
 	$(CC) $(CFLAGS_K) -c $< -o $@
 
+$(SRC_DIR)/lib/session.o: $(SRC_DIR)/lib/session.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
 $(SRC_DIR)/lib/shell.o: $(SRC_DIR)/lib/shell.c
 	$(CC) $(CFLAGS_K) -c $< -o $@
 
@@ -109,6 +125,24 @@ $(SRC_DIR)/lib/keyboard.o: $(SRC_DIR)/lib/keyboard.c
 	$(CC) $(CFLAGS_K) -c $< -o $@
 
 $(SRC_DIR)/lib/network.o: $(SRC_DIR)/lib/network.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/aes.o: $(SRC_DIR)/lib/aes.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/rsa.o: $(SRC_DIR)/lib/rsa.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/tls_prf.o: $(SRC_DIR)/lib/tls_prf.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/tls_record.o: $(SRC_DIR)/lib/tls_record.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/tls_handshake.o: $(SRC_DIR)/lib/tls_handshake.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/tls_client.o: $(SRC_DIR)/lib/tls_client.c
 	$(CC) $(CFLAGS_K) -c $< -o $@
 
 
