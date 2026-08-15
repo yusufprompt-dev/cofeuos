@@ -72,6 +72,7 @@ void sha256_init(sha256_context* ctx) {
 
 void sha256_update(sha256_context* ctx, const u8* data, size_t len) {
     size_t i;
+    size_t bufi;
     size_t index = (ctx->count[0] >> 3) & 0x3F;
     
     ctx->count[0] += (u32)(len << 3);
@@ -79,7 +80,6 @@ void sha256_update(sha256_context* ctx, const u8* data, size_t len) {
     ctx->count[1] += (u32)(len >> 29);
     
     size_t firstpart = 64 - index;
-    i = 0;
     
     if (len >= firstpart) {
         for (i = 0; i < firstpart; i++)
@@ -88,10 +88,14 @@ void sha256_update(sha256_context* ctx, const u8* data, size_t len) {
         
         for (i = firstpart; i + 63 < len; i += 64)
             sha256_transform(ctx, &data[i]);
+        bufi = 0;
+    } else {
+        i = 0;
+        bufi = index;
     }
     
     for (; i < len; i++)
-        ctx->buffer[index + i - firstpart] = data[i];
+        ctx->buffer[bufi++] = data[i];
 }
 
 void sha256_final(sha256_context* ctx, u8 digest[SHA256_DIGEST_SIZE]) {
@@ -102,7 +106,7 @@ void sha256_final(sha256_context* ctx, u8 digest[SHA256_DIGEST_SIZE]) {
     }
     
     sha256_update(ctx, (const u8*)"\200", 1);
-    while ((ctx->count[0] & 0x3f) != 56)
+    while (((ctx->count[0] >> 3) & 0x3f) != 56)
         sha256_update(ctx, (const u8*)"\0", 1);
     sha256_update(ctx, finalcount, 8);
     

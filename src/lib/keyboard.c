@@ -77,30 +77,21 @@ key_event_t try_read_key_event(void) {
     return ev;
 }
 
+extern void pit_delay_ms(unsigned int ms);
+
 key_event_t read_key_event(void) {
     key_event_t ev = {0, 0};
     if (!g_st) {
         while (1) __asm__ volatile("hlt");
     }
 
-    EFI_INPUT_KEY key;
-    EFI_STATUS status;
-
+    /* OVMF WaitForEvent firmware zamanlayıcısına bağımlıdır ve kernel
+       kendi IDT'sini kurduktan sonra asılabilir; burada PIT ile bekleyip
+       ConIn/PS2 kuyruğunu yokluyoruz. */
     while (1) {
-        UINTN index;
-        g_st->BootServices->WaitForEvent(1, &g_st->ConIn->WaitForKey, &index);
-
-        status = g_st->ConIn->ReadKeyStroke(g_st->ConIn, &key);
-        if (EFI_ERROR(status)) continue;
-
-        ev.scan_code = key.ScanCode;
-        if (key.UnicodeChar == 0x000D) ev.key = '\n';
-        else if (key.UnicodeChar == 0x0008) ev.key = '\b';
-        else if (key.UnicodeChar == 0x0010) ev.key = 16; /* Ctrl+P */
-        else if (key.UnicodeChar == 0x0018) ev.key = 24; /* Ctrl+X */
-        else if (key.UnicodeChar < 0x80) ev.key = (char)key.UnicodeChar;
-
-        return ev;
+        ev = try_read_key_event();
+        if (ev.key != 0 || ev.scan_code != 0) return ev;
+        pit_delay_ms(1);
     }
 }
 

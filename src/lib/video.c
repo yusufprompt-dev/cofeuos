@@ -88,6 +88,169 @@ void video_clear_rect(int x, int y, int w, int h) {
     video_fill_rect(x, y, w, h, 0);
 }
 
+/* ─── 32-bit renk yardımcıları (premium UI) ──────────────────── */
+void video_fill_rect32(int x, int y, int w, int h, u32 color32) {
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (w <= 0 || h <= 0) return;
+    if ((u32)x >= gop_width || (u32)y >= gop_height) return;
+    if ((u32)(x + w) > gop_width)  w = (int)gop_width - x;
+    if ((u32)(y + h) > gop_height) h = (int)gop_height - y;
+    for (int dy = 0; dy < h; dy++) {
+        u32 *row = g_fb + (u32)(y + dy) * g_pitch + (u32)x;
+        for (int dx = 0; dx < w; dx++) row[dx] = color32;
+    }
+}
+
+void video_clear_rect32(int x, int y, int w, int h, u32 color32) {
+    video_fill_rect32(x, y, w, h, color32);
+}
+
+void video_draw_rect32(int x, int y, int w, int h, u32 color32) {
+    video_fill_rect32(x, y, w, 1, color32);
+    video_fill_rect32(x, y + h - 1, w, 1, color32);
+    video_fill_rect32(x, y, 1, h, color32);
+    video_fill_rect32(x + w - 1, y, 1, h, color32);
+}
+
+void video_draw_char32(char c, int x, int y, u32 color32) {
+    if (!font) return;
+
+    u8 *glyph = (u8*)font_psf + font->headersize +
+                (unsigned char)c * font->charsize;
+    int bpr = ((int)font->width + 7) / 8;  /* bytes per row */
+
+    for (int row = 0; row < (int)font->height; row++) {
+        for (int col = 0; col < (int)font->width; col++) {
+            int bi = row * bpr + col / 8;
+            if ((u32)bi < font->charsize &&
+                glyph[bi] & (1 << (7 - col % 8))) {
+                video_put_pixel(x + col, y + row, color32);
+            }
+        }
+    }
+}
+
+void video_print32(const char *str, int x, int y, u32 color32) {
+    int cx = x;
+    while (*str) {
+        if (*str == '\n') {
+            y += font_height;
+            cx = x;
+        } else {
+            video_draw_char32(*str, cx, y, color32);
+            cx += font_width;
+        }
+        str++;
+        if (cx > (int)gop_width - font_width) {
+            cx = x;
+            y += font_height;
+        }
+    }
+}
+
+void video_draw_char_scaled(char c, int x, int y, int scale, u32 color32) {
+    if (!font || scale < 1) return;
+
+    u8 *glyph = (u8*)font_psf + font->headersize +
+                (unsigned char)c * font->charsize;
+    int bpr = ((int)font->width + 7) / 8;
+
+    for (int row = 0; row < (int)font->height; row++) {
+        for (int col = 0; col < (int)font->width; col++) {
+            int bi = row * bpr + col / 8;
+            if ((u32)bi < font->charsize &&
+                glyph[bi] & (1 << (7 - col % 8))) {
+                video_fill_rect32(x + col * scale, y + row * scale,
+                                  scale, scale, color32);
+            }
+        }
+    }
+}
+
+void video_print_scaled(const char *str, int x, int y, int scale, u32 color32) {
+    int cx = x;
+    while (*str) {
+        video_draw_char_scaled(*str, cx, y, scale, color32);
+        cx += font_width * scale;
+        str++;
+    }
+}
+
+void video_fill_gradient_v(int x, int y, int w, int h, u32 top, u32 bottom) {
+    if (h <= 1) {
+        video_fill_rect32(x, y, w, h, top);
+        return;
+    }
+    for (int dy = 0; dy < h; dy++) {
+        u32 c = video_blend(top, bottom, dy, h - 1);
+        video_fill_rect32(x, y + dy, w, 1, c);
+    }
+}
+
+/* c1 -> c2 arasında t/tmax oranında yumuşak renk geçişi */
+u32 video_blend(u32 c1, u32 c2, int t, int tmax) {
+    if (tmax <= 0) return c1;
+    if (t <= 0) return c1;
+    if (t >= tmax) return c2;
+
+    u32 r1 = (c1 >> 16) & 0xFF, g1 = (c1 >> 8) & 0xFF, b1 = c1 & 0xFF;
+    u32 r2 = (c2 >> 16) & 0xFF, g2 = (c2 >> 8) & 0xFF, b2 = c2 & 0xFF;
+
+    u32 r = r1 + ((r2 - r1) * t) / tmax;
+    u32 g = g1 + ((g2 - g1) * t) / tmax;
+    u32 b = b1 + ((b2 - b1) * t) / tmax;
+
+    return (r << 16) | (g << 8) | b;
+}
+
+/* ─── Yumuşak köşeli (rounded) dikdörtgenler ─────────────────── */
+
+/* (dx,dy) pikseli r yarıçaplı yuvarlatılmış w×h dikdörtgen içinde mi? */
+static int round_inside(int dx, int dy, int w, int h, int r) {
+    if (dx < 0 || dy < 0 || dx >= w || dy >= h) return 0;
+    if (r < 1 || dx >= r || dx < w - r) {
+        if (r < 1 || dy >= r || dy < h - r)
+            return 1;               /* çekirdek bölge */
+    }
+    /* köşe testi */
+    int cx, cy;
+    if (dx < r) cx = r - dx; else cx = dx - (w - r - 1);
+    if (dy < r) cy = r - dy; else cy = dy - (h - r - 1);
+    if (cx < 0) cx = 0;
+    if (cy < 0) cy = 0;
+    return (cx * cx + cy * cy) <= (r * r);
+}
+
+void video_fill_round_rect32(int x, int y, int w, int h, int r, u32 color32) {
+    if (r < 1) { video_fill_rect32(x, y, w, h, color32); return; }
+    if (r > w / 2) r = w / 2;
+    if (r > h / 2) r = h / 2;
+    if (r < 1) r = 1;
+    for (int dy = 0; dy < h; dy++) {
+        for (int dx = 0; dx < w; dx++) {
+            if (round_inside(dx, dy, w, h, r))
+                video_put_pixel(x + dx, y + dy, color32);
+        }
+    }
+}
+
+void video_draw_round_rect32(int x, int y, int w, int h, int r, u32 color32) {
+    if (r < 1) { video_draw_rect32(x, y, w, h, color32); return; }
+    if (r > w / 2) r = w / 2;
+    if (r > h / 2) r = h / 2;
+    if (r < 1) r = 1;
+    int ir = (r - 1 < 1) ? 1 : r - 1;
+    if (w - 2 < 1 || h - 2 < 1) { video_draw_rect32(x, y, w, h, color32); return; }
+    for (int dy = 0; dy < h; dy++) {
+        for (int dx = 0; dx < w; dx++) {
+            int border = round_inside(dx, dy, w, h, r) &&
+                        !round_inside(dx - 1, dy - 1, w - 2, h - 2, ir);
+            if (border) video_put_pixel(x + dx, y + dy, color32);
+        }
+    }
+}
+
 /* ─── Dikdörtgen ─────────────────────────────────────────────── */
 void video_fill_rect(int x, int y, int w, int h, u8 color) {
     u32 c = palette[color & 0xF];

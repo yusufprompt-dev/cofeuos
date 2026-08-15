@@ -11,7 +11,7 @@ void keyboard_init(void *st);
 void mouse_init(void *st);
 void network_init(void *st);
 void io_init(void *st, void *rs);
-void kernel_main(gop_info_t *gop_info);
+void kernel_main(gop_info_t *gop_info, void *mem_base);
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     EFI_BOOT_SERVICES *bs = SystemTable->BootServices;
@@ -46,7 +46,16 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     info.height      = gop->Mode->Info->VerticalResolution;
     info.pitch       = gop->Mode->Info->PixelsPerScanLine;
 
-    kernel_main(&info);
+    /* Kernel belleği: yanlışlıkla 0x0 adresine düşmemesi için sayfalar
+       halinde gerçek boş RAM tahsis edilir ve kernel_main'e iletilir. */
+    void *mem_base = NULL;
+    EFI_PHYSICAL_ADDRESS pages = 0;
+    status = bs->AllocatePages(AllocateAnyPages, EfiLoaderData,
+                               16 * 1024 * 1024 / 4096, &pages);
+    if (!EFI_ERROR(status))
+        mem_base = (void*)pages;
+
+    kernel_main(&info, mem_base);
 
     while (1) __asm__ volatile("hlt");
     return 0;

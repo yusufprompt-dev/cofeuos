@@ -8,6 +8,7 @@
 #include "types.h"
 #include "fs.h"
 #include "string.h"
+#include "web.h"
 
 #define MAX_PATH_LEN 256
 
@@ -41,14 +42,16 @@ typedef struct {
 #define WINDOW_TYPE_NOTES    3
 #define WINDOW_TYPE_INFO     4
 #define WINDOW_TYPE_CALC     5
+#define WINDOW_TYPE_BROWSER  6
 
 #define MAX_GUI_WINDOWS 8
-#define GUI_TERM_ROWS   16
-#define GUI_TERM_COLS   60
+#define GUI_TERM_ROWS   20
+#define GUI_TERM_COLS   80
 
 typedef struct {
     int id;
     int active;
+    int minimized;
     int x, y, w, h;
     char title[32];
     int type;
@@ -59,11 +62,28 @@ typedef struct {
     int  term_cx, term_cy;
     char input_buf[128];
     int  input_pos;
+
+    /* Tarayıcı verileri */
+    char url_buf[128];
+    int  url_pos;
+    char page_buf[4096];
+    int  page_len;
+    int  page_scroll;
+    char page_base[160];      /* geçerli sayfanın tam URL'si */
+    web_document_t *doc;      /* DOM ağacı */
+    web_css_rule_t *css;      /* ayrıştırılmış stiller */
+    web_box_t      *layout;   /* yerleşim kutusu ağacı */
+    int             page_h;   /* yerleşim toplam yüksekliği */
+
+    /* Hesap makinesi verileri */
+    char calc_disp[32];
+    int  calc_acc;
+    char calc_op;
+    int  calc_entered;
 } desktop_window_t;
 
 extern shell_control g_shell;
 extern int shell_execute(const char* cmd);
 
 #endif
-
 

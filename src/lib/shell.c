@@ -15,6 +15,8 @@ int num_splits = 1;
 #include "../include/keyboard.h"
 #include "../include/network.h"
 #include "../include/memory.h"
+#include "../include/session.h"
+#include "../include/js.h"
 
 
 extern shell_control g_shell;
@@ -31,6 +33,7 @@ static int cmd_cat(int argc, char** argv);
 static int cmd_pwd(int argc, char** argv);
 static int cmd_cd(int argc, char** argv);
 static int cmd_whoami(int argc, char** argv);
+static int cmd_logout(int argc, char** argv);
 static int cmd_uname(int argc, char** argv);
 static int cmd_clear(int argc, char** argv);
 static int cmd_neofetch(int argc, char** argv);
@@ -69,6 +72,7 @@ static int cmd_unzip(int argc, char** argv);
 static int cmd_untar(int argc, char** argv);
 static int cmd_nettest(int argc, char** argv);
 static int cmd_nslookup(int argc, char** argv);
+static int cmd_js(int argc, char** argv);
 
 int shell_execute(const char* cmd);
 
@@ -177,13 +181,16 @@ int shell_execute(const char* cmd) {
     char* args[16];
     int argc = shell_tokenize(cmd, args, 16);
     if (!argc) return 0;
-
+    dbg_write("[KRN] exec: ");
+    dbg_write(cmd);
+    dbg_write("\n");
     if (strcmp(args[0], "help") == 0) return cmd_help(argc, args);
     if (strcmp(args[0], "ls") == 0) return cmd_ls(argc, args);
     if (strcmp(args[0], "cat") == 0) return cmd_cat(argc, args);
     if (strcmp(args[0], "pwd") == 0) return cmd_pwd(argc, args);
     if (strcmp(args[0], "cd") == 0) return cmd_cd(argc, args);
     if (strcmp(args[0], "whoami") == 0) return cmd_whoami(argc, args);
+    if (strcmp(args[0], "logout") == 0) return cmd_logout(argc, args);
     if (strcmp(args[0], "uname") == 0) return cmd_uname(argc, args);
     if (strcmp(args[0], "clear") == 0) return cmd_clear(argc, args);
     if (strcmp(args[0], "neofetch") == 0) return cmd_neofetch(argc, args);
@@ -221,6 +228,7 @@ int shell_execute(const char* cmd) {
     if (strcmp(args[0], "untar") == 0 || strcmp(args[0], "tar") == 0) return cmd_untar(argc, args);
     if (strcmp(args[0], "nettest") == 0) return cmd_nettest(argc, args);
     if (strcmp(args[0], "nslookup") == 0) return cmd_nslookup(argc, args);
+    if (strcmp(args[0], "js") == 0) return cmd_js(argc, args);
     if (strcmp(args[0], "python") == 0 || strcmp(args[0], "python3") == 0) { if (argc > 1) { python_run_file(args[1]); } else { python_repl(); } return 0; }
 
     shell_print("cofeuOS: '", 12);
@@ -311,6 +319,14 @@ static int cmd_cd(int argc, char** argv) {
 }
 
 static int cmd_whoami(int argc, char** argv) { shell_print(g_shell.user, 10); return 0; }
+
+static int cmd_logout(int argc, char** argv) {
+    (void)argc; (void)argv;
+    session_clear();
+    shell_print("Oturum kapatildi. Kalici giris hafizasi silindi.\n", 13);
+    shell_print("Bir sonraki acilista tekrar giris yapmaniz gerekecek.\n", 13);
+    return 0;
+}
 static int cmd_uname(int argc, char** argv) { shell_print("cofeuOS v3.0 x86_64 UEFI", 14); return 0; }
 
 static int cmd_clear(int argc, char** argv) {
@@ -327,13 +343,14 @@ static int cmd_clear(int argc, char** argv) {
 
 static int cmd_neofetch(int argc, char** argv) {
     shell_print("    .-\"-.     ", 15);
-    shell_print("   / ..  \\    ", 15); shell_print("OS: cofeuOS v3.0", 11);
-    shell_print("  | (  )  |   ", 15); shell_print("Kernel: x86_64 UEFI", 11);
-    shell_print("   \\ ..  /    ", 15); shell_print("Shell: Cofeu Shell", 11);
-    shell_print("    `---'      ", 15); shell_print("Host: cofeu", 11);
-    shell_print("Python: MicroPython", 11);
-    shell_print("Disk: /dev/sda1", 11);
-    shell_print("Memory: 16MB", 11);
+    shell_print("   / ..  \\    ", 15); shell_print("OS     : cofeuOS v3.0", 11);
+    shell_print("  | (  )  |   ", 15); shell_print("Kernel : x86_64 cofeu", 10);
+    shell_print("   \\ ..  /    ", 15); shell_print("Shell  : Cofeu Shell", 11);
+    shell_print("    `---'      ", 15); shell_print("Host   : cofeu", 11);
+    shell_print("Python : MicroPython", 11);
+    shell_print("Disk   : /dev/sda1", 11);
+    shell_print("Memory : 16MB", 11);
+    shell_print("Net    : cofeu-net (TCP/IP)", 14);
     return 0;
 }
 
@@ -403,6 +420,7 @@ static int cmd_vim(int argc, char** argv)  { return cmd_text_editor(argc, argv, 
 static int cmd_nano(int argc, char** argv) { return cmd_text_editor(argc, argv, "nano"); }
 
 static int cmd_reboot(int argc, char** argv) {
+    dbg_write("[KRN] cmd_reboot\n");
     shell_print("Rebooting...", 14);
     uefi_reset_system();
     for (;;) { __asm__ volatile("hlt"); }
@@ -410,6 +428,7 @@ static int cmd_reboot(int argc, char** argv) {
 }
 
 static int cmd_halt(int argc, char** argv) {
+    dbg_write("[KRN] cmd_halt\n");
     shell_print("cofeuOS halted.", 12);
     uefi_shutdown();
     for (;;) { __asm__ volatile("hlt"); }
@@ -515,14 +534,18 @@ static int cmd_mkdir(int argc, char** argv) {
     shell_print("Created directory: ", 10); shell_print(argv[1], 10); shell_newline();
     return 0;
 }
-static int parse_http_url(const char* input, char* host, int host_len, char* path, int path_len) {
+static int parse_http_url(const char* input, char* host, int host_len, char* path, int path_len, int *use_https, int *port) {
     const char* p = input;
     if (p == NULL || host == NULL || path == NULL) return -1;
 
+    if (use_https) *use_https = 0;
+    if (port) *port = 80;
     if (strncmp(p, "http://", 7) == 0) {
         p += 7;
     } else if (strncmp(p, "https://", 8) == 0) {
         p += 8;
+        if (use_https) *use_https = 1;
+        if (port) *port = 443;
     } else {
         return -1;
     }
@@ -530,6 +553,26 @@ static int parse_http_url(const char* input, char* host, int host_len, char* pat
     const char* slash = strchr(p, '/');
     const char* query = strchr(p, '?');
     const char* end = slash ? slash : (query ? query : p + strlen(p));
+
+    /* :port ayikla (host kisminin sonuna kadar) */
+    const char *colon = NULL;
+    for (const char *q = p; q < end; q++) {
+        if (*q == ':') { colon = q; break; }
+    }
+    if (colon) {
+        int pv = 0;
+        const char *q = colon + 1;
+        while (q < end && *q >= '0' && *q <= '9') {
+            pv = pv * 10 + (*q - '0');
+            if (pv > 65535) return -1;
+            q++;
+        }
+        if (q == colon + 1) return -1;          /* bos port: hata */
+        if (q < end) return -1;                 /* port icinde harf: hata */
+        if (port) *port = pv;
+        end = colon;
+    }
+
     size_t host_len_value = (size_t)(end - p);
     if (host_len_value == 0 || host_len_value >= (size_t)host_len) {
         host_len_value = (size_t)(host_len - 1);
@@ -604,7 +647,12 @@ static void join_local_path(const char* base, const char* child, char* out, int 
     strncat(out, child, (size_t)(out_len - 1));
 }
 
-static int download_directory_contents(const char* host, const char* remote_dir, const char* local_dir, char* buf, int buflen) {
+static int shell_fetch_url(const char *host, const char *path, int use_https, unsigned short port, char *buf, int maxlen) {
+    if (use_https) return https_get_port(host, path, buf, maxlen, port);
+    return http_get_port(host, path, buf, maxlen, port);
+}
+
+static int download_directory_contents(const char* host, const char* remote_dir, const char* local_dir, char* buf, int buflen, int use_https, unsigned short port) {
     char remote_path[256];
     char child_remote[256];
     char child_local[256];
@@ -627,7 +675,7 @@ static int download_directory_contents(const char* host, const char* remote_dir,
         strcat(remote_path, "/");
     }
 
-    int len = wget(host, remote_path, temp_target, temp_buf, sizeof(temp_buf) - 1);
+    int len = shell_fetch_url(host, remote_path, use_https, port, temp_buf, sizeof(temp_buf) - 1);
     if (len <= 0) return -1;
     temp_buf[len] = '\0';
 
@@ -667,9 +715,9 @@ static int download_directory_contents(const char* host, const char* remote_dir,
                 href = strstr(end + 1, "href=");
                 continue;
             }
-            download_directory_contents(host, child_remote, child_local, buf, buflen);
+            download_directory_contents(host, child_remote, child_local, buf, buflen, use_https, port);
         } else {
-            wget(host, child_remote, child_local, buf, buflen);
+            shell_fetch_url(host, child_remote, use_https, port, buf, buflen);
         }
 
         href = strstr(end + 1, "href=");
@@ -691,8 +739,10 @@ static int cmd_wget(int argc, char** argv) {
     char local_path[256];
     char remote_path[256];
     int directory_mode = 0;
+    int use_https = 0;
+    unsigned short port = 80;
 
-    if (parse_http_url(argv[1], host, sizeof(host), http_path, sizeof(http_path)) == 0) {
+    if (parse_http_url(argv[1], host, sizeof(host), http_path, sizeof(http_path), &use_https, &port) == 0) {
         strcpy(remote_path, http_path);
         strcpy(local_path, http_path);
     } else {
@@ -739,7 +789,7 @@ static int cmd_wget(int argc, char** argv) {
     static char buf[4096];
     int len;
     if (directory_mode) {
-        if (download_directory_contents(host, remote_path, target_dir, buf, sizeof(buf) - 1) < 0) {
+        if (download_directory_contents(host, remote_path, target_dir, buf, sizeof(buf) - 1, use_https, port) < 0) {
             shell_print("wget: dizin indirilemedi", 12); shell_newline();
             return -1;
         }
@@ -747,7 +797,7 @@ static int cmd_wget(int argc, char** argv) {
         return 0;
     }
 
-    len = wget(host, remote_path, target, buf, sizeof(buf) - 1);
+    len = shell_fetch_url(host, remote_path, use_https, port, buf, sizeof(buf) - 1);
     
     if (len < 0) { 
         shell_print("wget: baglanti hatasi (", 12); 
@@ -991,14 +1041,15 @@ static int cmd_about(int argc, char** argv) {
 
 static int cmd_sysinfo(int argc, char** argv) {
     shell_print("Sistem Bilgisi:\n", 14);
-    shell_print("OS: cofeuOS v3.0\n", 11);
-    shell_print("Kernel: x86_64 UEFI GOP\n", 11);
-    shell_print("Video: ", 11);
+    shell_print("OS     : cofeuOS v3.0\n", 11);
+    shell_print("Kernel : x86_64 cofeu\n", 10);
+    shell_print("Video  : ", 11);
     shell_print_int(SCREEN_WIDTH, 11); shell_print("x", 11);
-    shell_print_int(SCREEN_HEIGHT, 11); shell_print("x32bpp\n", 11);
-    shell_print("Bellek: 16MB\n", 11);
-    shell_print("FS: cofeuFS (RAM)\n", 11);
-    shell_print("Python: MicroPython embed\n", 11);
+    shell_print_int(SCREEN_HEIGHT, 11); shell_print("x32bpp (GOP)\n", 11);
+    shell_print("Bellek : 16MB\n", 11);
+    shell_print("FS     : cofeuFS (RAM)\n", 11);
+    shell_print("Python : MicroPython embed\n", 11);
+    shell_print("Net    : cofeu-net / TCP+DNS+HTTP\n", 14);
     return 0;
 }
 
@@ -1208,26 +1259,16 @@ static int cmd_curl(int argc, char** argv) {
         return -1;
     }
     
-    /* URL parse et: http://domain/path veya http://ip/path */
+    /* URL parse et: http://domain/path veya http://ip:port/path */
     char host[64] = "";
     char path[256] = "/";
     int use_https = 0;
-    
-    const char *p = url;
-    if (strncmp(p, "http://", 7) == 0) p += 7;
-    else if (strncmp(p, "https://", 8) == 0) { p += 8; use_https = 1; }
-    
-    /* Host adını al */
-    const char *slash = strchr(p, '/');
-    if (slash) {
-        int host_len = (int)(slash - p);
-        if (host_len >= (int)sizeof(host)) host_len = (int)sizeof(host) - 1;
-        memcpy(host, p, host_len);
-        host[host_len] = '\0';
-        strcpy(path, slash);
-    } else {
-        strcpy(host, p);
-        strcpy(path, "/");
+    unsigned short port = 80;
+
+    if (parse_http_url(url, host, sizeof(host), path, sizeof(path), &use_https, &port) != 0) {
+        shell_print("curl: URL hatali", 12);
+        shell_newline();
+        return -1;
     }
     
     if (verbose) {
@@ -1243,18 +1284,23 @@ static int cmd_curl(int argc, char** argv) {
     
     if (use_https) {
         if (verbose) shell_print("curl: TLS baglantisi isteniyor...", 11);
-        len = https_get(host, path, buf, sizeof(buf) - 1);
+        len = https_get_port(host, path, buf, sizeof(buf) - 1, port);
     } else if (is_post && post_data[0]) {
         if (verbose) shell_print("curl: POST istegi gonderiliyor...", 11);
         len = http_post(host, path, post_data, strlen(post_data), buf, sizeof(buf) - 1);
     } else {
         if (verbose) shell_print("curl: GET istegi gonderiliyor...", 11);
-        len = http_get(host, path, buf, sizeof(buf) - 1);
+        len = http_get_port(host, path, buf, sizeof(buf) - 1, port);
     }
     
     if (len < 0) {
+        if (len == NETWORK_ERR_TLS_VERIFICATION_FAILED) {
+            shell_print("curl: HTTPS sertifika doğrulaması başarısız", 12);
+            shell_newline();
+            return -1;
+        }
         if (len == NETWORK_ERR_TLS_UNAVAILABLE) {
-            shell_print("curl: HTTPS/TLS ve CA deposu bu surumde kurulu degil", 12);
+            shell_print("curl: HTTPS/TLS handshakesi başarısız", 12);
             shell_newline();
             return -1;
         }
@@ -1613,6 +1659,426 @@ static int cmd_untar(int argc, char** argv) {
 
 /* ─── COFEUDE DESKTOP GUI V2 (Mouse Cursor, Window Manager, Window Terminal) ─── */
 
+/* ─── JS Motoru Bağlantısı (CofeuTarayici) ──────────────────
+   console.log → debugcon (port 0xE9), alert/prompt/confirm → basit
+   ekran kutusu + klavye. Klavye masaüstüyle aynı kaynaktan okunur. */
+static int ps2_kq_pop(key_event_t *ev);
+
+static void js_wait_key(key_event_t *ev) {
+    for (;;) {
+        ev->key = 0;
+        ev->scan_code = 0;
+        ps2_kq_pop(ev);
+        if (ev->key || ev->scan_code) return;
+        *ev = try_read_key_event();
+        if (ev->key || ev->scan_code) return;
+        pit_delay_ms(1);
+    }
+}
+
+static void js_log_cb(const char *msg) {
+    dbg_write("[JS] ");
+    dbg_write(msg);
+    dbg_write("\r\n");
+}
+
+static void js_dialog_box(const char *title, const char *msg) {
+    int w = SCREEN_WIDTH / 2;
+    if (w < 220) w = 220;
+    if (w > SCREEN_WIDTH - 20) w = SCREEN_WIDTH - 20;
+    int h = 5 * CHAR_HEIGHT;
+    int x = (SCREEN_WIDTH - w) / 2;
+    int y = (SCREEN_HEIGHT - h) / 2;
+    video_fill_rect(x, y, w, h, 1);
+    video_draw_rect(x, y, w, h, 15);
+    video_print(title, x + 8, y + 3, 11);
+    int wrap = (w - 16) / CHAR_WIDTH;
+    if (wrap < 1) wrap = 1;
+    const char *p = msg;
+    for (int line = 0; line < 3 && *p; line++) {
+        char buf[64];
+        int n = 0;
+        while (*p && n < wrap - 1 && n < (int)sizeof(buf) - 1) buf[n++] = *p++;
+        buf[n] = '\0';
+        video_print(buf, x + 8, y + 3 + (line + 2) * CHAR_HEIGHT, 15);
+    }
+}
+
+static void js_alert_cb(const char *msg) {
+    js_dialog_box("JavaScript - alert", msg);
+    key_event_t ev;
+    js_wait_key(&ev);
+}
+
+static int js_confirm_cb(const char *msg) {
+    js_dialog_box("JavaScript - confirm", msg);
+    int w = SCREEN_WIDTH / 2;
+    if (w < 220) w = 220;
+    int x = (SCREEN_WIDTH - w) / 2;
+    int y = (SCREEN_HEIGHT - 5 * CHAR_HEIGHT) / 2;
+    int fy = y + 4 * CHAR_HEIGHT;
+    for (;;) {
+        video_fill_rect(x + 8, fy, w - 16, CHAR_HEIGHT, 0);
+        video_print("[Y] Evet    [N] Hayir", x + 8, fy, 15);
+        key_event_t ev;
+        js_wait_key(&ev);
+        char ch = ev.key;
+        if (ch == 'y' || ch == 'Y' || ch == '\n' || ch == '\r') return 1;
+        if (ch == 'n' || ch == 'N') return 0;
+    }
+}
+
+static int js_prompt_cb(const char *msg, char *out, int out_size) {
+    js_dialog_box("JavaScript - prompt", msg);
+    int w = SCREEN_WIDTH / 2;
+    if (w < 220) w = 220;
+    int x = (SCREEN_WIDTH - w) / 2;
+    int y = (SCREEN_HEIGHT - 5 * CHAR_HEIGHT) / 2;
+    int iy = y + 4 * CHAR_HEIGHT;
+    int pos = 0;
+    out[0] = '\0';
+    for (;;) {
+        video_fill_rect(x + 8, iy, w - 16, CHAR_HEIGHT, 0);
+        char buf[64];
+        memcpy(buf, out, (size_t)pos);
+        buf[pos] = '\0';
+        int tx = x + 8;
+        if (pos > 0) video_print(buf, tx, iy, 15);
+        video_draw_cursor(tx + pos * CHAR_WIDTH, iy);
+        key_event_t ev;
+        js_wait_key(&ev);
+        char ch = ev.key;
+        video_restore_cursor(tx + pos * CHAR_WIDTH, iy);
+        if (ch == '\n' || ch == '\r') break;
+        else if (ch == '\b') {
+            if (pos > 0) { pos--; out[pos] = '\0'; }
+        } else if (ch >= 32 && pos < out_size - 1) {
+            out[pos++] = ch;
+            out[pos] = '\0';
+        }
+    }
+    return 1;
+}
+
+/* ─── CofeuTarayici DOM/CSS/layout tabanlı renderer ─────────
+   HTML -> DOM -> stil -> kutu ağacı; çizim video_*32 ile yapılır. */
+
+static u32 web_color_to_fb(u32 rgb) {
+    return ((rgb & 0xFFu) << 16) | (rgb & 0xFF00u) | ((rgb >> 16) & 0xFFu);
+}
+
+static void browser_free_page(desktop_window_t *w) {
+    if (w->layout) { web_free_boxes(w->layout); w->layout = NULL; }
+    if (w->css)    { web_free_css(w->css); w->css = NULL; }
+    if (w->doc)    { web_free_document(w->doc); w->doc = NULL; }
+    w->page_h = 0;
+}
+
+static void browser_navigate_url(desktop_window_t *w, const char *url);
+static void resolve_url(const char *base, const char *href, char *out, int out_size);
+static void browser_relayout_page(desktop_window_t *w);
+static int browser_handle_js_navigation(desktop_window_t *w);
+
+/* window.location = ile yonlendirme; sonsuz donguyu onle */
+static int g_js_redirects;
+
+static void browser_parse_page(desktop_window_t *w) {
+    browser_free_page(w);
+    if (w->page_len <= 0) return;
+    w->doc = web_parse_html(w->page_buf, (unsigned int)w->page_len);
+    if (!w->doc) return;
+    web_node_t *st[2];
+    int nst = web_get_elements_by_tag(w->doc->root, "style", st, 2);
+    if (nst == 1 && st[0]->first_child)
+        w->css = web_parse_css(st[0]->first_child->text,
+                               (unsigned int)strlen(st[0]->first_child->text));
+
+    /* JavaScript: <script> bloklarını sırayla çalıştır */
+    js_reset();
+    js_set_page(w->doc, w->css, w->url_buf);
+    web_node_t *sc[8];
+    int nsc = web_get_elements_by_tag(w->doc->root, "script", sc, 8);
+    for (int i = 0; i < nsc; i++) {
+        web_node_t *t = sc[i]->first_child;
+        if (t && t->text)
+            js_run(t->text, (int)strlen(t->text));
+    }
+
+    /* window.location.href atamasından doğan yönlendirme */
+    const char *nav = js_get_pending_nav();
+    if (nav && nav[0]) {
+        js_clear_pending_nav();
+        if (g_js_redirects >= 10) {
+            g_js_redirects = 0;
+            js_log_cb("JS: cok fazla yonlendirme, durduruldu");
+        } else {
+            g_js_redirects++;
+            char url[160];
+            resolve_url(w->page_base, nav, url, sizeof(url));
+            if (url[0]) browser_navigate_url(w, url);
+            return;
+        }
+    } else {
+        g_js_redirects = 0;
+    }
+
+    browser_relayout_page(w);
+
+    /* document.title -> pencere basligi */
+    if (w->doc && w->doc->title && w->doc->title[0]) {
+        strncpy(w->title, w->doc->title, sizeof(w->title) - 1);
+        w->title[sizeof(w->title) - 1] = '\0';
+    } else {
+        strcpy(w->title, "CofeuTarayici");
+    }
+}
+
+/* Dikdörtgeni content alanıyla kırpar; görünür ise 1 döner */
+static int clip_to_area(int *rx, int *ry, int *rw, int *rh,
+                        int ax, int ay, int aw, int ah) {
+    if (*rx < ax) { *rw -= ax - *rx; *rx = ax; }
+    if (*ry < ay) { *rh -= ay - *ry; *ry = ay; }
+    if (*rx + *rw > ax + aw) *rw = ax + aw - *rx;
+    if (*ry + *rh > ay + ah) *rh = ay + ah - *ry;
+    return *rw > 0 && *rh > 0;
+}
+
+static void render_box_tree(web_box_t *b, int dx, int dy,
+                            int ax, int ay, int aw, int ah) {
+    web_run_t *r;
+    web_box_t *c;
+    if (b->has_bg) {
+        int rx = b->x + dx, ry = b->y + dy, rw = b->w, rh = b->h;
+        if (clip_to_area(&rx, &ry, &rw, &rh, ax, ay, aw, ah))
+            video_fill_rect32(rx, ry, rw, rh, web_color_to_fb(b->bg_color));
+    }
+    if (b->border_w > 0) {
+        int rx = b->x + dx, ry = b->y + dy, rw = b->w, rh = b->h;
+        if (clip_to_area(&rx, &ry, &rw, &rh, ax, ay, aw, ah))
+            video_draw_rect32(rx, ry, rw, rh, web_color_to_fb(b->border_color));
+    }
+    for (r = b->runs; r; r = r->next) {
+        int rx = r->x + dx, ry = r->y + dy;
+        if (rx + r->w < ax || rx > ax + aw || ry + r->h < ay || ry > ay + ah) continue;
+        if (r->type == WEB_RUN_TEXT) {
+            if (r->has_bg)
+                video_fill_rect32(rx, ry, r->w, r->h, web_color_to_fb(r->bg));
+            u32 col = web_color_to_fb(r->color);
+            if (r->font_size == WEB_FONT_BIG)
+                video_print_scaled(r->text, rx, ry, 2, col);
+            else
+                video_print32(r->text, rx, ry, col);
+            if (r->is_link)
+                video_fill_rect32(rx, ry + r->h - 2, r->w, 1, col);
+        } else {
+            video_fill_rect32(rx, ry, r->w, r->h, web_color_to_fb(r->bg));
+            if (r->border_w > 0)
+                video_draw_rect32(rx, ry, r->w, r->h, web_color_to_fb(r->border_color));
+        }
+    }
+    for (c = b->first_child; c; c = c->next_sibling)
+        render_box_tree(c, dx, dy, ax, ay, aw, ah);
+}
+
+static void browser_render_page(desktop_window_t *w, int ax, int ay, int aw, int ah) {
+    if (!w->layout) return;
+    int max_scroll = w->page_h - ah;
+    if (max_scroll < 0) max_scroll = 0;
+    if (w->page_scroll > max_scroll) w->page_scroll = max_scroll;
+    if (w->page_scroll < 0) w->page_scroll = 0;
+    render_box_tree(w->layout, ax + 8, ay + 6 - w->page_scroll, ax, ay, aw, ah);
+}
+
+/* Çizilen kutulardan, tıklama konumuna karşılık gelen en iç DOM elemanını bulur. */
+static web_node_t *find_click_node(web_box_t *b, int dx, int dy, int sx, int sy) {
+    web_node_t *hit = NULL;
+    for (web_box_t *c = b->first_child; c; c = c->next_sibling) {
+        web_node_t *child = find_click_node(c, dx, dy, sx, sy);
+        if (child) hit = child;
+    }
+    for (web_run_t *r = b->runs; r; r = r->next) {
+        if (sx >= r->x + dx && sx < r->x + dx + r->w &&
+            sy >= r->y + dy && sy < r->y + dy + r->h)
+            hit = r->node;
+    }
+    if (!hit && sx >= b->x + dx && sx < b->x + dx + b->w &&
+        sy >= b->y + dy && sy < b->y + dy + b->h)
+        hit = b->node;
+    while (hit && hit->type != WEB_NODE_ELEMENT) hit = hit->parent;
+    return hit;
+}
+
+static void browser_relayout_page(desktop_window_t *w) {
+    if (w->layout) { web_free_boxes(w->layout); w->layout = NULL; }
+    if (w->doc)
+        w->page_h = web_layout(w->doc->root, w->css, w->w - 24, w->h - 56, &w->layout);
+}
+
+/* Ekran koordinatındaki tıklamanın üzerindeki <a href> değerini döner */
+static const char *find_link_run(web_box_t *b, int dx, int dy, int sx, int sy) {
+    web_run_t *r;
+    web_box_t *c;
+    for (r = b->runs; r; r = r->next) {
+        if (r->is_link && sx >= r->x + dx && sx < r->x + dx + r->w &&
+            sy >= r->y + dy && sy < r->y + dy + r->h) {
+            if (r->node && r->node->parent)
+                return web_node_attr(r->node->parent, "href");
+            return NULL;
+        }
+    }
+    for (c = b->first_child; c; c = c->next_sibling) {
+        const char *h = find_link_run(c, dx, dy, sx, sy);
+        if (h) return h;
+    }
+    return NULL;
+}
+
+/* Göreli bağlantıyı taban URL'e göre çözer */
+static void resolve_url(const char *base, const char *href, char *out, int out_size) {
+    if (strncmp(href, "http://", 7) == 0 || strncmp(href, "https://", 8) == 0) {
+        strncpy(out, href, out_size - 1);
+        out[out_size - 1] = '\0';
+        return;
+    }
+    const char *scheme = strstr(base, "://");
+    if (!scheme) {
+        strncpy(out, href, out_size - 1);
+        out[out_size - 1] = '\0';
+        return;
+    }
+    const char *scheme_end = scheme + 3;
+    const char *host_start = scheme_end;
+    const char *host_end = host_start;
+    while (*host_end && *host_end != '/') host_end++;
+    int n = 0;
+    const char *sp = base;
+    while (sp < scheme_end && n < out_size - 1) out[n++] = *sp++;
+    while (host_start < host_end && n < out_size - 1) out[n++] = *host_start++;
+    while (n < out_size - 1 && *href) out[n++] = *href++;
+    out[n] = '\0';
+    (void)base;
+}
+
+static void browser_navigate_url(desktop_window_t *w, const char *url);
+
+static void browser_click_page(desktop_window_t *w, int sx, int sy) {
+    if (!w->layout || w->page_len <= 0) return;
+    int ax = w->x + 6, ay = w->y + 52;
+    web_node_t *node = find_click_node(w->layout, ax + 8, ay + 6 - w->page_scroll, sx, sy);
+    if (node && js_dispatch_click(node)) {
+        if (browser_handle_js_navigation(w)) return;
+        browser_relayout_page(w);
+    }
+    const char *href = find_link_run(w->layout, ax + 8, ay + 6 - w->page_scroll, sx, sy);
+    if (href) {
+        char url[160];
+        resolve_url(w->page_base, href, url, sizeof(url));
+        if (url[0]) browser_navigate_url(w, url);
+    }
+}
+
+static void browser_navigate_url(desktop_window_t *w, const char *url) {
+    char host[128];
+    char path[256];
+    int use_https = 0;
+    unsigned short port = 80;
+    if (parse_http_url(url, host, sizeof(host), path, sizeof(path), &use_https, &port) != 0) {
+        w->page_len = -1;
+        w->page_scroll = 0;
+        return;
+    }
+    int len = use_https ? https_get_port(host, path, w->page_buf, (int)sizeof(w->page_buf) - 1, port)
+                        : http_get_port(host, path, w->page_buf, (int)sizeof(w->page_buf) - 1, port);
+    if (len < 0) {
+        w->page_len = -1;
+        w->page_scroll = 0;
+        return;
+    }
+    w->page_len = len;
+    w->page_buf[len] = '\0';
+    strncpy(w->url_buf, url, sizeof(w->url_buf) - 1);
+    w->url_buf[sizeof(w->url_buf) - 1] = '\0';
+    w->url_pos = (int)strlen(w->url_buf);
+    strncpy(w->page_base, url, sizeof(w->page_base) - 1);
+    w->page_base[sizeof(w->page_base) - 1] = '\0';
+    w->page_scroll = 0;
+    browser_parse_page(w);
+}
+
+static int browser_handle_js_navigation(desktop_window_t *w) {
+    const char *nav = js_get_pending_nav();
+    if (!nav || !nav[0]) return 0;
+    char requested[160];
+    strncpy(requested, nav, sizeof(requested) - 1);
+    requested[sizeof(requested) - 1] = '\0';
+    js_clear_pending_nav();
+    char url[160];
+    resolve_url(w->page_base, requested, url, sizeof(url));
+    if (url[0]) browser_navigate_url(w, url);
+    return 1;
+}
+
+static void browser_navigate(desktop_window_t *w) {
+    w->url_buf[w->url_pos] = '\0';
+    browser_navigate_url(w, w->url_buf);
+}
+
+/* ─── Hesap Makinesi ─────────────────────────────────────────────── */
+static const char *calc_labels[16] = {"7","8","9","/","4","5","6","*","1","2","3","-","C","0","=","+"};
+
+static void calc_set_disp_int(desktop_window_t *w, int v) {
+    char tmp[16];
+    int k = 0, n = 0;
+    if (v == 0) { w->calc_disp[0] = '0'; w->calc_disp[1] = '\0'; return; }
+    if (v < 0) { w->calc_disp[n++] = '-'; v = -v; }
+    while (v > 0) { tmp[k++] = (char)('0' + v % 10); v /= 10; }
+    while (k > 0) w->calc_disp[n++] = tmp[--k];
+    w->calc_disp[n] = '\0';
+}
+
+static void calc_press(desktop_window_t *w, int idx) {
+    const char *s = calc_labels[idx];
+    char ch = s[0];
+    int len;
+
+    if (idx == 12) { /* C: temizle */
+        w->calc_disp[0] = '0'; w->calc_disp[1] = '\0';
+        w->calc_acc = 0; w->calc_op = 0; w->calc_entered = 0;
+        return;
+    }
+    if (idx == 14) { /* = */
+        int right = shell_atoi(w->calc_disp);
+        int result;
+        if (w->calc_op == '+')      result = w->calc_acc + right;
+        else if (w->calc_op == '-') result = w->calc_acc - right;
+        else if (w->calc_op == '*') result = w->calc_acc * right;
+        else if (w->calc_op == '/') result = right ? w->calc_acc / right : 0;
+        else                        result = right;
+        w->calc_acc = 0; w->calc_op = 0;
+        calc_set_disp_int(w, result);
+        w->calc_entered = 1;
+        return;
+    }
+    if (ch >= '0' && ch <= '9') {
+        if (w->calc_entered) { w->calc_disp[0] = '\0'; w->calc_entered = 0; }
+        len = (int)strlen(w->calc_disp);
+        if (len < 14) { w->calc_disp[len] = ch; w->calc_disp[len + 1] = '\0'; }
+    } else { /* + - * / */
+        if (w->calc_op && !w->calc_entered) {
+            int right = shell_atoi(w->calc_disp);
+            if (w->calc_op == '+')      w->calc_acc += right;
+            else if (w->calc_op == '-') w->calc_acc -= right;
+            else if (w->calc_op == '*') w->calc_acc *= right;
+            else if (w->calc_op == '/') w->calc_acc = right ? w->calc_acc / right : 0;
+            calc_set_disp_int(w, w->calc_acc);
+        } else {
+            w->calc_acc = shell_atoi(w->calc_disp);
+        }
+        w->calc_op = ch;
+        w->calc_entered = 1;
+    }
+}
+
 static desktop_window_t g_windows[MAX_GUI_WINDOWS];
 static int g_window_count = 0;
 static int g_active_win = -1;
@@ -1623,6 +2089,7 @@ static int g_drag_off_y = 0;
 static void desktop_open_program(int type) {
     for (int i = 0; i < g_window_count; i++) {
         if (g_windows[i].active && g_windows[i].type == type) {
+            g_windows[i].minimized = 0;
             g_active_win = i;
             return;
         }
@@ -1641,11 +2108,12 @@ static void desktop_open_program(int type) {
     memset(w, 0, sizeof(desktop_window_t));
     w->id = slot + 1;
     w->active = 1;
+    w->minimized = 0;
     w->type = type;
 
     if (type == WINDOW_TYPE_TERMINAL) {
         strcpy(w->title, "cofeuTerminal");
-        w->x = 95; w->y = 25; w->w = 530; w->h = 340;
+        w->x = 95; w->y = 25; w->w = 680; w->h = 420;
         w->term_cx = 0; w->term_cy = 0;
         w->input_pos = 0; w->input_buf[0] = '\0';
         g_gui_term_target = w;
@@ -1665,6 +2133,15 @@ static void desktop_open_program(int type) {
     } else if (type == WINDOW_TYPE_CALC) {
         strcpy(w->title, "Hesap Makinesi");
         w->x = 160; w->y = 70; w->w = 340; w->h = 250;
+        w->calc_disp[0] = '0'; w->calc_disp[1] = '\0';
+        w->calc_acc = 0; w->calc_op = 0; w->calc_entered = 0;
+    } else if (type == WINDOW_TYPE_BROWSER) {
+        strcpy(w->title, "CofeuTarayici");
+        w->x = 70; w->y = 30; w->w = 620; w->h = 420;
+        strcpy(w->url_buf, "http://example.com");
+        w->url_pos = (int)strlen(w->url_buf);
+        w->page_len = 0;
+        w->page_scroll = 0;
     }
 
     g_active_win = slot;
@@ -1677,8 +2154,24 @@ static void gui_term_print_string(desktop_window_t *w, const char *str, u8 color
     }
 }
 
+/* GUI terminali pencere dışına taşırmadan aktif komut satırını çizer. */
+static void gui_term_draw_prompt(desktop_window_t *w, int x, int y, int focused) {
+    char line[GUI_TERM_COLS + 1];
+    int max_cols = (w->w - 20) / CHAR_WIDTH;
+    if (max_cols > GUI_TERM_COLS) max_cols = GUI_TERM_COLS;
+    int n = 0;
+    const char *user = g_shell.user;
+    while (*user && n < 12 && n < max_cols - 1) line[n++] = *user++;
+    const char *suffix = "@cofeu $ ";
+    for (int i = 0; suffix[i] && n < max_cols - 1; i++) line[n++] = suffix[i];
+    for (int i = 0; w->input_buf[i] && n < max_cols - 1; i++) line[n++] = w->input_buf[i];
+    if (focused && n < max_cols) line[n++] = '_';
+    line[n] = '\0';
+    video_print(line, x, y, 15);
+}
+
 static void desktop_draw_single_window(desktop_window_t *w, int is_focused) {
-    if (!w || !w->active) return;
+    if (!w || !w->active || w->minimized) return;
 
     /* Başlık Çubuğu */
     u8 title_bg = is_focused ? 9 : 8;
@@ -1691,6 +2184,12 @@ static void desktop_draw_single_window(desktop_window_t *w, int is_focused) {
     video_fill_rect(btn_x, btn_y, 16, 16, 12);
     video_draw_char('X', btn_x + 4, btn_y, 15);
 
+    /* Küçült [–] Butonu */
+    int min_x = w->x + w->w - 40;
+    video_fill_rect(min_x, btn_y, 16, 16, 1);
+    video_draw_rect(min_x, btn_y, 16, 16, 15);
+    video_fill_rect(min_x + 3, btn_y + 11, 10, 2, 15);
+
     /* Gövde Alanı */
     video_fill_rect(w->x, w->y + 22, w->w, w->h - 22, 7);
     video_draw_rect(w->x, w->y, w->w, w->h, 15);
@@ -1700,31 +2199,25 @@ static void desktop_draw_single_window(desktop_window_t *w, int is_focused) {
         /* Terminal İç Siyah Ekran */
         video_fill_rect(w->x + 6, w->y + 26, w->w - 12, w->h - 32, 0);
 
-        /* Satırları Yazdır (18px satır yüksekliği) */
+        /* Satırları fontun gerçek yüksekliğiyle çiz. */
         int start_y = w->y + 28;
         for (int r = 0; r < GUI_TERM_ROWS; r++) {
-            int line_y = start_y + r * 18;
-            if (line_y + 18 > w->y + w->h - 30) break;
+            int line_y = start_y + r * CHAR_HEIGHT;
+            if (line_y + CHAR_HEIGHT > w->y + w->h - 30) break;
 
             for (int c = 0; c < GUI_TERM_COLS; c++) {
                 char ch = w->term_screen[r][c];
                 u8 col = w->term_colors[r][c] ? w->term_colors[r][c] : 15;
                 if (ch && ch >= 32) {
-                    video_draw_char(ch, w->x + 10 + c * 8, line_y, col);
+                    video_draw_char(ch, w->x + 10 + c * CHAR_WIDTH, line_y, col);
                 }
             }
         }
 
         /* Aktif Prompt Satırı */
-        int prompt_y = start_y + w->term_cy * 18;
-        if (prompt_y + 18 <= w->y + w->h - 28) {
-            int px = w->x + 10;
-            video_print(g_shell.user, px, prompt_y, 10); px += video_text_width(g_shell.user);
-            video_print("@cofeu # ", px, prompt_y, 14); px += video_text_width("@cofeu # ");
-            video_print(w->input_buf, px, prompt_y, 15); px += video_text_width(w->input_buf);
-            if (is_focused) {
-                video_draw_char('_', px, prompt_y, 11);
-            }
+        int prompt_y = start_y + w->term_cy * CHAR_HEIGHT;
+        if (prompt_y + CHAR_HEIGHT <= w->y + w->h - 28) {
+            gui_term_draw_prompt(w, w->x + 10, prompt_y, is_focused);
         }
     } else if (w->type == WINDOW_TYPE_FILES) {
         video_print("Dizin: ", w->x + 12, w->y + 32, 0);
@@ -1758,15 +2251,328 @@ static void desktop_draw_single_window(desktop_window_t *w, int is_focused) {
         video_print("Bellek: 16MB Arena Allocator", w->x + 15, w->y + 120, 0);
         video_print("Ag Katmani: DHCP + TCP/IP + HTTP", w->x + 15, w->y + 138, 0);
     } else if (w->type == WINDOW_TYPE_CALC) {
-        video_print("cofeuDE Mini Hesap Makinesi", w->x + 15, w->y + 32, 1);
-        video_fill_rect(w->x + 15, w->y + 54, w->w - 30, 32, 0);
-        video_print("128 + 256 = 384", w->x + 25, w->y + 62, 10);
-        video_print("Komut satirindan 'calc <a> + <b>' kullanabilirsiniz.", w->x + 15, w->y + 105, 0);
+        /* Ekran */
+        video_fill_rect(w->x + 15, w->y + 30, w->w - 30, 34, 0);
+        video_draw_rect(w->x + 15, w->y + 30, w->w - 30, 34, 8);
+        video_print(w->calc_disp, w->x + 22, w->y + 38, 10);
+
+        /* Buton Izgarası: 4x4 */
+        int bw = (w->w - 38) / 4;
+        int bx = w->x + 15;
+        int by = w->y + 74;
+        for (int i = 0; i < 16; i++) {
+            int r = i / 4, c = i % 4;
+            int ccx = bx + c * (bw + 2);
+            int ccy = by + r * 32;
+            video_fill_rect(ccx, ccy, bw, 30, 2);
+            video_draw_rect(ccx, ccy, bw, 30, 15);
+            video_print(calc_labels[i], ccx + 6, ccy + 6, 15);
+        }
+    } else if (w->type == WINDOW_TYPE_BROWSER) {
+        /* Adres Çubuğu */
+        video_fill_rect(w->x + 8, w->y + 26, w->w - 16, 20, 0);
+        video_draw_rect(w->x + 8, w->y + 26, w->w - 16, 20, 8);
+        video_print(w->url_buf, w->x + 12, w->y + 29, 15);
+        if (is_focused) {
+            int ux = w->x + 12 + video_text_width(w->url_buf);
+            video_draw_char('_', ux, w->y + 29, 11);
+        }
+        /* GO Butonu */
+        video_fill_rect(w->x + w->w - 60, w->y + 27, 52, 18, 3);
+        video_draw_rect(w->x + w->w - 60, w->y + 27, 52, 18, 15);
+        video_print("GO", w->x + w->w - 49, w->y + 29, 15);
+
+        /* İçerik Alanı (beyaz zemin: web sayfaları koyu metin) */
+        int cy = w->y + 52;
+        int ch = w->h - 56;
+        video_fill_rect(w->x + 6, cy, w->w - 12, ch, 15);
+        video_draw_rect(w->x + 6, cy, w->w - 12, ch, 8);
+
+        if (w->page_len < 0) {
+            video_print("Yuklenemedi: URL gecersiz veya ag hatasi.", w->x + 14, cy + 6, 12);
+            video_print("Ag baglantisi icin 'ping'/'wget' ile test edin.", w->x + 14, cy + 24, 12);
+        } else if (w->page_len == 0) {
+            video_print("Adres girip Enter'a basin veya GO'a tiklayin.", w->x + 14, cy + 6, 8);
+            video_print("Ornek: http://example.com", w->x + 14, cy + 24, 8);
+        } else {
+            int cy = w->y + 52;
+            int ch = w->h - 56;
+            browser_render_page(w, w->x + 6, cy, w->w - 12, ch);
+        }
     }
+}
+
+/* ─── PS/2 Tek Okuyucu (UEFI Simple Pointer yoksa) ───────────────────
+   QEMU/OVMF fareyi (Simple Pointer) sağlamaz; fare PS/2'dir ve klavye
+   ile AYNI 8042 çıkış tamponunu (0x60) paylaşır. Bu yüzden iki ayrı
+   tüketici (OVMF ConIn + bizim fare okuyucu) çakışır: fare okumak
+   klavye tuşlarını çalar. Çözüm: TEK okuyucu. Kernel 0x60'ı okur,
+   Set-1 tarama kodlarını klavyeye, bit3'lü baytları fare paketine
+   ayırır. Fark:
+     - bit7'li bayt      -> klavye break/prefix (yok say)
+     - bilinen klavye    -> klavye (Shift, Ctrl, 0x40-0x53 arası)
+     - bit3'lü bayt      -> fare paket başlangıcı
+     - geri kalan        -> klavye make
+   Sonuç: 7/8/9/0 tuşları fare baytlarıyla birebir aynı olduğundan
+   kaybolur; geri kalan her şey (harfler, 1-6, noktalama, Enter,
+   backspace, Shift, ok tuşları) çalışır. */
+static int g_ps2_mouse_ready = 0;
+static int g_ps2_mouse_phase = 0;
+static u8  g_ps2_pkt[3];
+static int g_ps2_e0 = 0;
+static int g_ps2_shift = 0;
+
+static int g_ps2_kq_head = 0;
+static int g_ps2_kq_tail = 0;
+static key_event_t g_ps2_kq[16];
+
+static int g_ps2_dbg_count = 0;
+static void ps2_dbg_byte(u8 b) {
+    if (g_ps2_dbg_count >= 60) return;
+    g_ps2_dbg_count++;
+    static const char hex[] = "0123456789ABCDEF";
+    char tmp[4] = {' ', hex[b >> 4], hex[b & 0xF], 0};
+    dbg_write(tmp);
+}
+
+static void ps2_kq_push(char key, int scan) {
+    int next = (g_ps2_kq_head + 1) % 16;
+    if (next == g_ps2_kq_tail) return;   /* kuyruk dolu */
+    g_ps2_kq[g_ps2_kq_head].key = key;
+    g_ps2_kq[g_ps2_kq_head].scan_code = scan;
+    g_ps2_kq_head = next;
+}
+
+static int ps2_kq_pop(key_event_t *ev) {
+    if (g_ps2_kq_tail == g_ps2_kq_head) return 0;
+    *ev = g_ps2_kq[g_ps2_kq_tail];
+    g_ps2_kq_tail = (g_ps2_kq_tail + 1) % 16;
+    return 1;
+}
+
+/* PS/2 Set-1 tarama kodu -> ASCII (bastırmasız) */
+static const char ps2_key_base[0x60] = {
+    0, 0, '1','2','3','4','5','6','7','8','9','0','-','=','\b','\t',
+    'q','w','e','r','t','y','u','i','o','p','[',']','\n', 0,'a','s',
+    'd','f','g','h','j','k','l',';','\'','`', 0,'\\','z','x','c','v',
+    'b','n','m',',','.','/', 0,'*', 0,' ', 0
+};
+
+/* Shift basılıyken */
+static const char ps2_key_shift[0x60] = {
+    0, 0, '!','@','#','$','%','^','&','*','(',')','_','+','\b','\t',
+    'Q','W','E','R','T','Y','U','I','O','P','{','}','\n', 0,'A','S',
+    'D','F','G','H','J','K','L',':','"','~', 0,'|','Z','X','C','V',
+    'B','N','M','<','>','?', 0,'*', 0,' ', 0
+};
+
+static inline u8 ps2_inb(u16 port) {
+    u8 v;
+    __asm__ volatile("inb %w1, %0" : "=a"(v) : "Nd"(port));
+    return v;
+}
+
+static inline void ps2_outb(u16 port, u8 v) {
+    __asm__ volatile("outb %0, %w1" : : "a"(v), "Nd"(port));
+}
+
+static void ps2_delay(void) {
+    volatile u32 i;
+    for (i = 0; i < 1500; i++) __asm__ volatile("nop");
+}
+
+static void ps2_wait_input_empty(void) {
+    for (int i = 0; i < 5000; i++) {
+        if (!(ps2_inb(0x64) & 0x02)) return;
+        ps2_delay();
+    }
+}
+
+static void ps2_flush_output(void) {
+    for (int i = 0; i < 100; i++) {
+        if (ps2_inb(0x64) & 0x01) { (void)ps2_inb(0x60); ps2_delay(); }
+        else return;
+    }
+}
+
+static void ps2_mouse_init(void) {
+    /* 8042 aux kanalını aç (klavye kanalına dokunulmaz) */
+    ps2_wait_input_empty();
+    ps2_outb(0x64, 0xA8);               /* aux cihazı etkin */
+    ps2_delay();
+    ps2_wait_input_empty();
+    ps2_outb(0x64, 0x20);               /* komut baytını iste */
+    ps2_delay();
+    u8 cb = ps2_inb(0x60);
+    cb &= ~0x04;                        /* aux devre dışı değil */
+    cb &= ~0x20;                        /* aux saat sinyali açık */
+    ps2_wait_input_empty();
+    ps2_outb(0x64, 0x60);               /* komut baytını yaz */
+    ps2_delay();
+    ps2_outb(0x60, cb);
+    ps2_delay();
+    ps2_flush_output();
+    ps2_wait_input_empty();
+    ps2_outb(0x64, 0xD4);               /* sonraki veri aux'a gider */
+    ps2_delay();
+    ps2_wait_input_empty();
+    ps2_outb(0x60, 0xF4);               /* data raporlamayı başlat */
+    ps2_delay();
+    ps2_flush_output();
+    g_ps2_mouse_ready = 1;
+}
+
+static void ps2_decode_mouse(u8 p0, u8 b1, u8 b2, mouse_state_t *ms) {
+    int dx = b1 & 0x80 ? (int)b1 - 256 : (int)b1;
+    int dy = b2 & 0x80 ? (int)b2 - 256 : (int)b2;
+    if (g_ps2_dbg_count < 60) {
+        char tmp[4] = {'M', (p0 & 1) ? 'L' : '-', ' ', 0};
+        dbg_write(tmp);
+    }
+    ms->dx += dx * 2;
+    ms->dy += -dy * 2;
+    if (ms->dx > 60) ms->dx = 60;
+    if (ms->dx < -60) ms->dx = -60;
+    if (ms->dy > 60) ms->dy = 60;
+    if (ms->dy < -60) ms->dy = -60;
+    if (p0 & 0x01) ms->left_btn = 1;
+    if (p0 & 0x02) ms->right_btn = 1;
+}
+
+static void ps2_read_both(mouse_state_t *ms, key_event_t *ev) {
+    if (!g_ps2_mouse_ready) ps2_mouse_init();
+    ms->dx = 0; ms->dy = 0; ms->dz = 0;
+    ms->left_btn = 0; ms->right_btn = 0;
+    ev->key = 0; ev->scan_code = 0;
+
+    for (int guard = 0; guard < 48; guard++) {
+        if (!(ps2_inb(0x64) & 0x01)) break;
+        u8 st = ps2_inb(0x64);
+        u8 b = ps2_inb(0x60);
+        int is_mouse = (st & 0x20) != 0;
+        ps2_dbg_byte(b);
+
+        if (is_mouse) {
+            /* 8042 status bit 0x20: bayt aux (fare) kanalından. */
+            if (g_ps2_mouse_phase != 0) {
+                g_ps2_pkt[g_ps2_mouse_phase++] = b;
+                if (g_ps2_mouse_phase == 3) {
+                    g_ps2_mouse_phase = 0;
+                    ps2_decode_mouse(g_ps2_pkt[0], g_ps2_pkt[1], g_ps2_pkt[2], ms);
+                }
+            } else {
+                g_ps2_pkt[0] = b;
+                g_ps2_mouse_phase = 1;
+            }
+            continue;
+        }
+
+        /* Klavye baytı; paket ortasındaysak senkron bozulmuş, paketi düşür. */
+        if (g_ps2_mouse_phase != 0) g_ps2_mouse_phase = 0;
+
+        /* E0 öneki: ok tuşları */
+        if (g_ps2_e0) {
+            g_ps2_e0 = 0;
+            if (b == 0x48) ps2_kq_push(0, 1);       /* Up */
+            else if (b == 0x50) ps2_kq_push(0, 2);  /* Down */
+            else if (b == 0x4D) ps2_kq_push(0, 3);  /* Right */
+            else if (b == 0x4B) ps2_kq_push(0, 4);  /* Left */
+            continue;
+        }
+
+        if (b == 0xE0) { g_ps2_e0 = 1; continue; }
+
+        /* Break kodları */
+        if (b & 0x80) {
+            if (b == 0xAA || b == 0xB6) g_ps2_shift = 0;
+            continue;
+        }
+
+        /* Bilinen klavye make kodları */
+        switch (b) {
+            case 0x1D:                        /* sol ctrl */
+            case 0x38: continue;              /* alt */
+            case 0x2A: case 0x36: g_ps2_shift = 1; continue;   /* shift */
+            case 0x3A: case 0x3B: case 0x3C: case 0x3D: case 0x3E: case 0x3F:
+            case 0x40: case 0x41: case 0x42: case 0x43: case 0x44: case 0x45:
+            case 0x46: case 0x47: case 0x48: case 0x49: case 0x4A: case 0x4B:
+            case 0x4C: case 0x4D: case 0x4E: case 0x4F: case 0x50: case 0x51:
+            case 0x52: case 0x53: case 0x57: case 0x58: continue;  /* F-key/numpad */
+            default: break;
+        }
+
+        /* Klavye make -> ASCII */
+        char c = 0;
+        if (b < 0x60) c = g_ps2_shift ? ps2_key_shift[b] : ps2_key_base[b];
+        if (c) ps2_kq_push(c, 0);
+    }
+
+    ps2_kq_pop(ev);
+}
+
+static void desktop_input_read(mouse_state_t *ms, key_event_t *ev) {
+    ev->key = 0; ev->scan_code = 0;
+    ms->dx = 0; ms->dy = 0; ms->dz = 0;
+    ms->left_btn = 0; ms->right_btn = 0;
+    if (mouse_get_state(ms) == 0) return;   /* UEFI Simple Pointer varsa: klavye ConIn'dan */
+    ps2_read_both(ms, ev);                  /* yoksa tek okuyucu */
+}
+
+static void desktop_draw_clock(int seconds) {
+    char buf[12];
+    int h = seconds / 3600;
+    int m = (seconds % 3600) / 60;
+    int s = seconds % 60;
+    int i = 0;
+    buf[i++] = (char)('0' + h / 10);
+    buf[i++] = (char)('0' + h % 10);
+    buf[i++] = ':';
+    buf[i++] = (char)('0' + m / 10);
+    buf[i++] = (char)('0' + m % 10);
+    buf[i++] = ':';
+    buf[i++] = (char)('0' + s / 10);
+    buf[i++] = (char)('0' + s % 10);
+    buf[i] = '\0';
+    video_print(buf, SCREEN_WIDTH - 70, SCREEN_HEIGHT - 19, 15);
+}
+
+static int cmd_js(int argc, char** argv) {
+    if (argc < 2) {
+        shell_print("kullanim: js <dosya>  (JavaScript calistirir)", 12);
+        shell_newline();
+        return -1;
+    }
+    js_init();
+    js_set_log_cb(js_log_cb);
+    js_set_alert_cb(js_alert_cb);
+    js_set_prompt_cb(js_prompt_cb);
+    js_set_confirm_cb(js_confirm_cb);
+    js_reset();
+    char content[4096];
+    int r = fs_read_file(&g_fs, argv[1], content, sizeof(content));
+    if (r < 0) {
+        shell_print("js: dosya bulunamadi: ", 12);
+        shell_print(argv[1], 12);
+        shell_newline();
+        return -1;
+    }
+    if (js_run(content, r) != 0) {
+        shell_print("js: hata!", 12);
+        shell_newline();
+        return -1;
+    }
+    return 0;
 }
 
 static int cmd_desktop(int argc, char** argv) {
     (void)argc; (void)argv;
+
+    /* JS motoru geri çağrımlarını bağla */
+    js_init();
+    js_set_log_cb(js_log_cb);
+    js_set_alert_cb(js_alert_cb);
+    js_set_prompt_cb(js_prompt_cb);
+    js_set_confirm_cb(js_confirm_cb);
 
     fs_create_dir(&g_fs, "/home");
     if (!fs_file_exists(&g_fs, "/home/notes.txt"))
@@ -1782,13 +2588,22 @@ static int cmd_desktop(int argc, char** argv) {
     int start_menu_open = 0;
     int prev_left_btn = 0;
     int needs_redraw = 1;
+    int clock_sec = 0;
+    int clock_ms = 0;
 
     video_clear(1);
 
     while (1) {
-        /* 1. Fare verilerini oku */
+        /* 1. Fare + Klavye Girişi (tek okuyucu).
+           UEFI Simple Pointer varsa fare SimplePointer'dan, klavye
+           ConIn'dan okunur. Yoksa PS/2 tek okuyucu hem fare paketlerini
+           hem klavye tarama kodlarını 8042 tamponundan çevirir; OVMF
+           ConIn sadece yedek olarak yoklanır. */
         mouse_state_t ms;
-        mouse_get_state(&ms);
+        key_event_t ev = {0, 0};
+        desktop_input_read(&ms, &ev);
+        if (ev.key == 0 && ev.scan_code == 0)
+            ev = try_read_key_event();      /* ConIn yedeği */
 
         int moved = 0;
         if (ms.dx != 0 || ms.dy != 0) {
@@ -1798,10 +2613,16 @@ static int cmd_desktop(int argc, char** argv) {
         }
 
         /* 2. Klavye Girişi ve Ok Tuşları ile İmleç Kontrolü */
-        key_event_t ev = try_read_key_event();
         if (ev.scan_code != 0 || ev.key != 0) {
-            /* Klavye Ok Tuşları ile Fare İmleci Hareketi */
-            if (ev.scan_code == 1) { my -= 12; moved = 1; }      /* Up */
+            /* Aktif pencere tarayıcıysa ok tuşları sayfayı kaydırır */
+            int br_focus = (g_active_win >= 0 && g_active_win < g_window_count &&
+                            g_windows[g_active_win].active &&
+                            g_windows[g_active_win].type == WINDOW_TYPE_BROWSER);
+            if (br_focus && (ev.scan_code == 1 || ev.scan_code == 2)) {
+                desktop_window_t *bw = &g_windows[g_active_win];
+                if (ev.scan_code == 1 && bw->page_scroll > 0) { bw->page_scroll -= 18; needs_redraw = 1; }
+                else if (ev.scan_code == 2) { bw->page_scroll += 18; needs_redraw = 1; }
+            } else if (ev.scan_code == 1) { my -= 12; moved = 1; }      /* Up */
             else if (ev.scan_code == 2) { my += 12; moved = 1; }  /* Down */
             else if (ev.scan_code == 3) { mx += 12; moved = 1; }  /* Right */
             else if (ev.scan_code == 4) { mx -= 12; moved = 1; }  /* Left */
@@ -1812,7 +2633,6 @@ static int cmd_desktop(int argc, char** argv) {
 
                 if (w->type == WINDOW_TYPE_TERMINAL) {
                     if (ev.key == '\n') {
-                        /* Prompt ve Komutu Ekrana Yazdır */
                         gui_term_print_string(w, g_shell.user, 10);
                         gui_term_print_string(w, "@cofeu # ", 14);
                         gui_term_print_string(w, w->input_buf, 15);
@@ -1838,6 +2658,21 @@ static int cmd_desktop(int argc, char** argv) {
                     } else if (ev.key >= 32 && w->input_pos < (int)sizeof(w->input_buf) - 1) {
                         w->input_buf[w->input_pos++] = ev.key;
                         w->input_buf[w->input_pos] = '\0';
+                        needs_redraw = 1;
+                    }
+                } else if (w->type == WINDOW_TYPE_BROWSER) {
+                    if (ev.key == '\n') {
+                        browser_navigate(w);
+                        needs_redraw = 1;
+                    } else if (ev.key == '\b') {
+                        if (w->url_pos > 0) {
+                            w->url_pos--;
+                            w->url_buf[w->url_pos] = '\0';
+                            needs_redraw = 1;
+                        }
+                    } else if (ev.key >= 32 && w->url_pos < (int)sizeof(w->url_buf) - 1) {
+                        w->url_buf[w->url_pos++] = ev.key;
+                        w->url_buf[w->url_pos] = '\0';
                         needs_redraw = 1;
                     }
                 }
@@ -1875,13 +2710,14 @@ static int cmd_desktop(int argc, char** argv) {
                 start_menu_open = !start_menu_open;
             }
             /* Başlat Menüsü Elemanları Tıklaması */
-            else if (start_menu_open && mx >= 4 && mx <= 144 && my >= SCREEN_HEIGHT - 175 && my < SCREEN_HEIGHT - 26) {
-                if (my >= SCREEN_HEIGHT - 150 && my < SCREEN_HEIGHT - 130) desktop_open_program(WINDOW_TYPE_TERMINAL);
-                else if (my >= SCREEN_HEIGHT - 130 && my < SCREEN_HEIGHT - 110) desktop_open_program(WINDOW_TYPE_FILES);
-                else if (my >= SCREEN_HEIGHT - 110 && my < SCREEN_HEIGHT - 90)  desktop_open_program(WINDOW_TYPE_NOTES);
-                else if (my >= SCREEN_HEIGHT - 90  && my < SCREEN_HEIGHT - 70)  desktop_open_program(WINDOW_TYPE_INFO);
-                else if (my >= SCREEN_HEIGHT - 70  && my < SCREEN_HEIGHT - 50)  desktop_open_program(WINDOW_TYPE_CALC);
-                else if (my >= SCREEN_HEIGHT - 50) {
+            else if (start_menu_open && mx >= 4 && mx <= 144 && my >= SCREEN_HEIGHT - 195 && my < SCREEN_HEIGHT - 26) {
+                if (my >= SCREEN_HEIGHT - 165 && my < SCREEN_HEIGHT - 145) desktop_open_program(WINDOW_TYPE_TERMINAL);
+                else if (my >= SCREEN_HEIGHT - 145 && my < SCREEN_HEIGHT - 125) desktop_open_program(WINDOW_TYPE_FILES);
+                else if (my >= SCREEN_HEIGHT - 125 && my < SCREEN_HEIGHT - 105) desktop_open_program(WINDOW_TYPE_NOTES);
+                else if (my >= SCREEN_HEIGHT - 105 && my < SCREEN_HEIGHT - 85)  desktop_open_program(WINDOW_TYPE_INFO);
+                else if (my >= SCREEN_HEIGHT - 85  && my < SCREEN_HEIGHT - 65)  desktop_open_program(WINDOW_TYPE_CALC);
+                else if (my >= SCREEN_HEIGHT - 65  && my < SCREEN_HEIGHT - 45)  desktop_open_program(WINDOW_TYPE_BROWSER);
+                else if (my >= SCREEN_HEIGHT - 45) {
                     video_clear(0); cursor_x = 5; cursor_y = 30;
                     shell_print("Masaustunden cikildi.\n", 10);
                     return 0;
@@ -1892,15 +2728,46 @@ static int cmd_desktop(int argc, char** argv) {
                 start_menu_open = 0;
 
                 int handled = 0;
+
+                /* Görev Çubuğu Sekmeleri: tıklanan pencereyi geri getir / odakla */
+                int tab_x = 90;
+                for (int i = 0; i < g_window_count; i++) {
+                    if (g_windows[i].active) {
+                        if (mx >= tab_x && mx < tab_x + 110 &&
+                            my >= SCREEN_HEIGHT - 23 && my < SCREEN_HEIGHT - 3) {
+                            g_windows[i].minimized = 0;
+                            g_active_win = i;
+                            handled = 1;
+                            break;
+                        }
+                        tab_x += 115;
+                    }
+                }
+
                 /* Önce Aktif Pencere Etkileşimini Kontrol Et */
-                if (g_active_win >= 0 && g_active_win < g_window_count && g_windows[g_active_win].active) {
+                if (!handled && g_active_win >= 0 && g_active_win < g_window_count && g_windows[g_active_win].active) {
                     desktop_window_t *w = &g_windows[g_active_win];
                     int btn_x = w->x + w->w - 20;
                     int btn_y = w->y + 3;
 
+                    /* Küçült [–] Butonuna mı Basıldı? */
+                    int min_x = w->x + w->w - 40;
+                    if (mx >= min_x && mx <= min_x + 16 && my >= btn_y && my <= btn_y + 16) {
+                        int old = g_active_win;
+                        w->minimized = 1;
+                        g_active_win = -1;
+                        for (int k = 0; k < g_window_count; k++) {
+                            if (k != old && g_windows[k].active && !g_windows[k].minimized) {
+                                g_active_win = k; break;
+                            }
+                        }
+                        handled = 1;
+                    }
                     /* Kapatma [X] Butonuna mı Basıldı? */
-                    if (mx >= btn_x && mx <= btn_x + 16 && my >= btn_y && my <= btn_y + 16) {
+                    else if (mx >= btn_x && mx <= btn_x + 16 && my >= btn_y && my <= btn_y + 16) {
+                        if (w->type == WINDOW_TYPE_BROWSER) browser_free_page(w);
                         w->active = 0;
+                        w->minimized = 0;
                         g_active_win = -1;
                         for (int k = 0; k < g_window_count; k++) {
                             if (g_windows[k].active) { g_active_win = k; break; }
@@ -1908,10 +2775,36 @@ static int cmd_desktop(int argc, char** argv) {
                         handled = 1;
                     }
                     /* Başlık Çubuğuna mı Basıldı? (Sürükleme Başlat) */
-                    else if (mx >= w->x && mx <= w->x + w->w - 22 && my >= w->y && my <= w->y + 22) {
+                    else if (mx >= w->x && mx <= w->x + w->w - 42 && my >= w->y && my <= w->y + 22) {
                         g_drag_win = g_active_win;
                         g_drag_off_x = mx - w->x;
                         g_drag_off_y = my - w->y;
+                        handled = 1;
+                    }
+                    /* Tarayıcı GO Butonu mu? */
+                    else if (w->type == WINDOW_TYPE_BROWSER &&
+                             mx >= w->x + w->w - 60 && mx <= w->x + w->w - 8 &&
+                             my >= w->y + 27 && my <= w->y + 45) {
+                        browser_navigate(w);
+                        needs_redraw = 1;
+                        handled = 1;
+                    }
+                    /* Tarayıcı sayfa içi bağlantı tıklaması mı? */
+                    else if (w->type == WINDOW_TYPE_BROWSER && w->page_len > 0 &&
+                             mx >= w->x + 6 && mx <= w->x + w->w - 6 &&
+                             my >= w->y + 52 && my <= w->y + w->h - 4) {
+                        browser_click_page(w, mx, my);
+                        needs_redraw = 1;
+                        handled = 1;
+                    }
+                    /* Hesap Makinesi Butonları mı? */
+                    else if (w->type == WINDOW_TYPE_CALC &&
+                             mx >= w->x + 15 && mx <= w->x + w->w - 15 &&
+                             my >= w->y + 74 && my <= w->y + 200) {
+                        int c = (mx - (w->x + 15)) / ((w->w - 38) / 4 + 2);
+                        int r = (my - (w->y + 74)) / 32;
+                        if (c >= 0 && c < 4 && r >= 0 && r < 4) calc_press(w, r * 4 + c);
+                        needs_redraw = 1;
                         handled = 1;
                     }
                     /* Pencere İçine mi Basıldı? */
@@ -1928,14 +2821,15 @@ static int cmd_desktop(int argc, char** argv) {
                             int btn_x = w->x + w->w - 20;
                             int btn_y = w->y + 3;
                             if (mx >= btn_x && mx <= btn_x + 16 && my >= btn_y && my <= btn_y + 16) {
+                                if (w->type == WINDOW_TYPE_BROWSER) browser_free_page(w);
                                 w->active = 0;
                                 handled = 1;
                                 break;
                             } else if (mx >= w->x && mx <= w->x + w->w && my >= w->y && my <= w->y + w->h) {
+                                w->minimized = 0;
                                 g_active_win = i;
-                                g_drag_win = i;
-                                g_drag_off_x = mx - w->x;
-                                g_drag_off_y = my - w->y;
+                                /* İçeriğe tıklamak yalnızca odağı değiştirir.
+                                   Sürükleme, aktif pencerenin başlık çubuğundan başlar. */
                                 handled = 1;
                                 break;
                             }
@@ -1950,7 +2844,8 @@ static int cmd_desktop(int argc, char** argv) {
                     else if (my >= 160 && my <= 210) desktop_open_program(WINDOW_TYPE_NOTES);
                     else if (my >= 230 && my <= 280) desktop_open_program(WINDOW_TYPE_INFO);
                     else if (my >= 300 && my <= 350) desktop_open_program(WINDOW_TYPE_CALC);
-                    else if (my >= 370 && my <= 420) {
+                    else if (my >= 370 && my <= 420) desktop_open_program(WINDOW_TYPE_BROWSER);
+                    else if (my >= 440 && my <= 490) {
                         video_clear(0); cursor_x = 5; cursor_y = 30;
                         shell_print("Masaustunden cikildi.\n", 10);
                         return 0;
@@ -1973,7 +2868,8 @@ static int cmd_desktop(int argc, char** argv) {
             video_fill_rect(15, 160, 56, 44, 5); video_draw_rect(15, 160, 56, 44, 15); video_print("TXT", 30, 172, 15); video_print("Notlar", 18, 208, 15);
             video_fill_rect(15, 230, 56, 44, 6); video_draw_rect(15, 230, 56, 44, 15); video_print("INFO", 26, 242, 15); video_print("Sistem", 18, 278, 15);
             video_fill_rect(15, 300, 56, 44, 2); video_draw_rect(15, 300, 56, 44, 15); video_print("123", 30, 312, 15); video_print("Hesap", 20, 348, 15);
-            video_fill_rect(15, 370, 56, 44, 4); video_draw_rect(15, 370, 56, 44, 15); video_print("EXIT", 26, 382, 15); video_print("Cikis", 22, 418, 15);
+            video_fill_rect(15, 370, 56, 44, 4); video_draw_rect(15, 370, 56, 44, 15); video_print("WWW", 27, 382, 15); video_print("Tarayici", 14, 418, 15);
+            video_fill_rect(15, 440, 56, 44, 4); video_draw_rect(15, 440, 56, 44, 15); video_print("EXIT", 26, 452, 15); video_print("Cikis", 22, 488, 15);
 
             /* Pencereler */
             for (int i = 0; i < g_window_count; i++) {
@@ -1996,25 +2892,31 @@ static int cmd_desktop(int argc, char** argv) {
             for (int i = 0; i < g_window_count; i++) {
                 if (g_windows[i].active) {
                     int is_act = (i == g_active_win);
-                    video_fill_rect(tab_x, SCREEN_HEIGHT - 23, 110, 20, is_act ? 9 : 7);
+                    int is_min = g_windows[i].minimized;
+                    video_fill_rect(tab_x, SCREEN_HEIGHT - 23, 110, 20, is_act ? 9 : (is_min ? 8 : 7));
                     video_draw_rect(tab_x, SCREEN_HEIGHT - 23, 110, 20, 15);
-                    video_print(g_windows[i].title, tab_x + 6, SCREEN_HEIGHT - 19, is_act ? 15 : 0);
+                    video_print(g_windows[i].title, tab_x + 6, SCREEN_HEIGHT - 19,
+                                is_act ? 15 : (is_min ? 8 : 0));
+                    if (is_min) {
+                        video_print("[-]", tab_x + 92, SCREEN_HEIGHT - 19, 12);
+                    }
                     tab_x += 115;
                 }
             }
-            video_print("GUI v2.0", SCREEN_WIDTH - 75, SCREEN_HEIGHT - 19, 15);
+            desktop_draw_clock(clock_sec);
 
             /* Başlat Menüsü Pop-up */
             if (start_menu_open) {
-                video_fill_rect(4, SCREEN_HEIGHT - 175, 140, 148, 8);
-                video_draw_rect(4, SCREEN_HEIGHT - 175, 140, 148, 15);
-                video_print("  Uygulamalar", 12, SCREEN_HEIGHT - 167, 14);
-                video_fill_rect(8, SCREEN_HEIGHT - 151, 132, 1, 7);
-                video_print("[>] Terminal", 12, SCREEN_HEIGHT - 145, 15);
-                video_print("[>] Dosyalar", 12, SCREEN_HEIGHT - 125, 15);
-                video_print("[>] Notlar",   12, SCREEN_HEIGHT - 105, 15);
-                video_print("[>] Sistem",   12, SCREEN_HEIGHT - 85,  15);
-                video_print("[>] Hesap",    12, SCREEN_HEIGHT - 65,  15);
+                video_fill_rect(4, SCREEN_HEIGHT - 195, 140, 168, 8);
+                video_draw_rect(4, SCREEN_HEIGHT - 195, 140, 168, 15);
+                video_print("  Uygulamalar", 12, SCREEN_HEIGHT - 187, 14);
+                video_fill_rect(8, SCREEN_HEIGHT - 171, 132, 1, 7);
+                video_print("[>] Terminal", 12, SCREEN_HEIGHT - 165, 15);
+                video_print("[>] Dosyalar", 12, SCREEN_HEIGHT - 145, 15);
+                video_print("[>] Notlar",   12, SCREEN_HEIGHT - 125, 15);
+                video_print("[>] Sistem",   12, SCREEN_HEIGHT - 105, 15);
+                video_print("[>] Hesap",    12, SCREEN_HEIGHT - 85,  15);
+                video_print("[>] Tarayici", 12, SCREEN_HEIGHT - 65,  15);
                 video_print("[X] Cikis",    12, SCREEN_HEIGHT - 45,  12);
             }
 
@@ -2031,7 +2933,22 @@ static int cmd_desktop(int argc, char** argv) {
             prev_my = my;
         }
 
-        kbd_delay(12000);
+        /* Döngüyü 1ms adımla; masaüstü saati bu sayaçtan beslenir */
+        pit_delay_ms(1);
+        if (js_tick(1) > 0 && g_active_win >= 0 &&
+            g_active_win < g_window_count) {
+            desktop_window_t *bw = &g_windows[g_active_win];
+            if (bw->active && bw->type == WINDOW_TYPE_BROWSER) {
+                if (!browser_handle_js_navigation(bw)) browser_relayout_page(bw);
+                needs_redraw = 1;
+            }
+        }
+        clock_ms += 1;
+        if (clock_ms >= 1000) {
+            clock_ms -= 1000;
+            clock_sec++;
+            needs_redraw = 1;
+        }
     }
 }
 
@@ -2056,4 +2973,3 @@ static int cmd_env(int argc, char** argv) {
     shell_newline();
     return 0;
 }static int cmd_sudo(int argc, char** argv) { return cmd_rodo(argc, argv); }
-

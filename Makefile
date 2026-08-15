@@ -14,7 +14,9 @@ ISO_NAME = CofeuOS-x86_64.iso
 ISO_ROOT = iso
 
 # ─── Ağ / Teşhis Bayrakları ────────────────────────────
-NETWORK_DEBUG_FLAGS ?= -DNETWORK_DEBUG
+# UEFI ConOut'a yoğun ağ teşhisi masaüstünü bozup yavaşlatmasın.
+# Gerektiğinde: make iso NETWORK_DEBUG_FLAGS=-DNETWORK_DEBUG
+NETWORK_DEBUG_FLAGS ?=
 NETWORK_CONFIG_FLAGS ?= -DNETWORK_IP0=10 -DNETWORK_IP1=0 -DNETWORK_IP2=2 -DNETWORK_IP3=15 \
                         -DNETWORK_GATEWAY0=10 -DNETWORK_GATEWAY1=0 -DNETWORK_GATEWAY2=2 -DNETWORK_GATEWAY3=2 \
                         -DNETWORK_DNS0=10 -DNETWORK_DNS1=0 -DNETWORK_DNS2=2 -DNETWORK_DNS3=3
@@ -63,6 +65,11 @@ OBJS = $(BOOT_DIR)/efi_main.o \
        $(SRC_DIR)/lib/tls_record.o \
        $(SRC_DIR)/lib/tls_handshake.o \
        $(SRC_DIR)/lib/tls_client.o \
+       $(SRC_DIR)/lib/html.o \
+       $(SRC_DIR)/lib/css.o \
+       $(SRC_DIR)/lib/layout.o \
+       $(SRC_DIR)/lib/web_mem.o \
+       $(SRC_DIR)/lib/js.o \
        font.o
 
 # ─── Hedefler ──────────────────────────────────────────
@@ -145,6 +152,20 @@ $(SRC_DIR)/lib/tls_handshake.o: $(SRC_DIR)/lib/tls_handshake.c
 $(SRC_DIR)/lib/tls_client.o: $(SRC_DIR)/lib/tls_client.c
 	$(CC) $(CFLAGS_K) -c $< -o $@
 
+$(SRC_DIR)/lib/html.o: $(SRC_DIR)/lib/html.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/css.o: $(SRC_DIR)/lib/css.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/layout.o: $(SRC_DIR)/lib/layout.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/web_mem.o: $(SRC_DIR)/lib/web_mem.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/js.o: $(SRC_DIR)/lib/js.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
 
 
 # ─── Font ──────────────────────────────────────────────
