@@ -9,40 +9,32 @@
  */
 #include <stdint.h>
 #include "../include/string.h"
-
-#define BN_MAX_WORDS 128
-#define BN_MAX_BYTES (BN_MAX_WORDS * 4)
-
-/* 4096 bitlik ara sonuclar (carpim/sifreleme) icin yeterli genislik */
-typedef struct {
-    uint32_t d[BN_MAX_WORDS];
-    int n;                    /* kullanilan kelime sayisi (little-endian) */
-} bignum_t;
+#include "../include/bignum.h"
 
 /* ---- temel yardimcilar ---- */
 
-static void bn_zero(bignum_t *a) {
+void bn_zero(bignum_t *a) {
     a->n = 0;
     memset(a->d, 0, sizeof(a->d));
 }
 
-static void bn_copy(bignum_t *dst, const bignum_t *src) {
+void bn_copy(bignum_t *dst, const bignum_t *src) {
     dst->n = src->n;
     memcpy(dst->d, src->d, src->n * sizeof(uint32_t));
 }
 
-static int bn_cmp(const bignum_t *a, const bignum_t *b) {
+int bn_cmp(const bignum_t *a, const bignum_t *b) {
     if (a->n != b->n) return a->n > b->n ? 1 : -1;
     for (int i = a->n - 1; i >= 0; i--)
         if (a->d[i] != b->d[i]) return a->d[i] > b->d[i] ? 1 : -1;
     return 0;
 }
 
-static void bn_trim(bignum_t *a) {   /* basusteki sifir kelimeleri at */
+void bn_trim(bignum_t *a) {   /* basusteki sifir kelimeleri at */
     while (a->n > 0 && a->d[a->n - 1] == 0) a->n--;
 }
 
-static void bn_from_bytes(bignum_t *a, const unsigned char *bytes, int len) {
+void bn_from_bytes(bignum_t *a, const unsigned char *bytes, int len) {
     bn_zero(a);
     a->n = (len + 3) / 4;
     for (int i = 0; i < len; i++)
@@ -50,7 +42,7 @@ static void bn_from_bytes(bignum_t *a, const unsigned char *bytes, int len) {
     bn_trim(a);
 }
 
-static void bn_to_bytes(const bignum_t *a, unsigned char *bytes, int len) {
+void bn_to_bytes(const bignum_t *a, unsigned char *bytes, int len) {
     memset(bytes, 0, len);
     for (int i = 0; i < len; i++) {
         int word = i / 4;
@@ -59,7 +51,7 @@ static void bn_to_bytes(const bignum_t *a, unsigned char *bytes, int len) {
     }
 }
 
-static int bn_bitlen(const bignum_t *a) {
+int bn_bitlen(const bignum_t *a) {
     if (a->n == 0) return 0;
     uint32_t top = a->d[a->n - 1];
     int bits = 31;
@@ -69,8 +61,7 @@ static int bn_bitlen(const bignum_t *a) {
 
 /* ---- bignum aritmetik ---- */
 
-__attribute__((unused))
-static void bignum_add(const bignum_t *a, const bignum_t *b, bignum_t *r) {
+void bignum_add(const bignum_t *a, const bignum_t *b, bignum_t *r) {
     uint64_t carry = 0;
     int n = a->n > b->n ? a->n : b->n;
     for (int i = 0; i < n; i++) {
@@ -85,7 +76,7 @@ static void bignum_add(const bignum_t *a, const bignum_t *b, bignum_t *r) {
     bn_trim(r);
 }
 
-static void bignum_sub(const bignum_t *a, const bignum_t *b, bignum_t *r) {
+void bignum_sub(const bignum_t *a, const bignum_t *b, bignum_t *r) {
     int64_t borrow = 0;
     int n = a->n;
     for (int i = 0; i < n; i++) {
@@ -98,7 +89,7 @@ static void bignum_sub(const bignum_t *a, const bignum_t *b, bignum_t *r) {
     bn_trim(r);
 }
 
-static void bignum_mul(const bignum_t *a, const bignum_t *b, bignum_t *r) {
+void bignum_mul(const bignum_t *a, const bignum_t *b, bignum_t *r) {
     bn_zero(r);
     for (int i = 0; i < a->n; i++) {
         uint64_t carry = 0;
@@ -125,14 +116,14 @@ static void bn_shr1(bignum_t *a) {
 }
 
 /* kelime bazli sola kaydirma */
-static void bn_lshift_words(bignum_t *a, int words) {
+void bn_lshift_words(bignum_t *a, int words) {
     if (a->n == 0 || words == 0) return;
     for (int i = a->n - 1; i >= 0; i--) a->d[i + words] = a->d[i];
     for (int i = 0; i < words; i++) a->d[i] = 0;
     a->n += words;
 }
 
-static void bignum_mod(const bignum_t *a, const bignum_t *m, bignum_t *r) {
+void bignum_mod(const bignum_t *a, const bignum_t *m, bignum_t *r) {
     bignum_t s, tmp;
     bn_copy(r, a);
     bn_trim(r);
@@ -166,7 +157,7 @@ static void bignum_mod(const bignum_t *a, const bignum_t *m, bignum_t *r) {
  * Square-and-multiply ile moduler us alma.
  * result = base^exp mod mod
  */
-static void bignum_modpow(const bignum_t *base, const bignum_t *exp,
+void bignum_modpow(const bignum_t *base, const bignum_t *exp,
                    const bignum_t *mod, bignum_t *result) {
     bignum_t b, e, r, tmp;
     bn_copy(&b, base);
@@ -182,11 +173,11 @@ static void bignum_modpow(const bignum_t *base, const bignum_t *exp,
         }
         bignum_mul(&b, &b, &tmp);          /* her adimda kare */
         bignum_mod(&tmp, mod, &b);
-        uint64_t carry = 0;                /* e >>= 1 */
-        for (int i = 0; i < e.n; i++) {
-            uint64_t val = ((uint64_t)e.d[i] >> 1) | carry;
-            carry = (uint64_t)e.d[i] << 31;
-            e.d[i] = (uint32_t)val;
+        uint32_t carry = 0;                /* e >>= 1 */
+        for (int i = e.n - 1; i >= 0; i--) {
+            uint32_t new_carry = e.d[i] & 1;
+            e.d[i] = (e.d[i] >> 1) | (carry << 31);
+            carry = new_carry;
         }
         bn_trim(&e);
     }
@@ -318,6 +309,53 @@ void rsa_pkcs1_encrypt(const unsigned char *plaintext, int plain_len,
     bn_from_bytes(&m, padded, mod_len);
     bignum_modpow(&m, &e, &n, &c);
     bn_to_bytes(&c, out_ciphertext, mod_len);
+}
+
+/*
+ * PKCS#1 v1.5 imza dogrulama: s^e mod n = m.
+ * m formu: 0x00 0x01 0xFF... 0x00 DigestInfo
+ * DigestInfo (SHA-256): 3021300906052b0e03021a05000414 || digest(32)
+ * 0: dogru; -1: gecersiz.
+ */
+int rsa_pkcs1_verify(const unsigned char *sig, int sig_len,
+                     const unsigned char *modulus, int mod_len,
+                     unsigned int exponent,
+                     const unsigned char *digest, int digest_len) {
+    static const unsigned char digestinfo_sha256[] = {
+        0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86,
+        0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05,
+        0x00, 0x04, 0x20
+    };
+    const int di_len = (int)sizeof(digestinfo_sha256);
+
+    if (mod_len < 3 || mod_len > 256) return -1;
+    if (sig_len != mod_len) return -1;
+    if (digest_len != 32) return -1;
+
+    /* m = s^e mod n */
+    bignum_t s, e, n, m;
+    bn_from_bytes(&n, modulus, mod_len);
+    bn_zero(&e);
+    e.d[0] = exponent;
+    e.n = 1;
+    bn_from_bytes(&s, sig, sig_len);
+    if (bn_cmp(&s, &n) >= 0) return -1;          /* s >= n gecersiz */
+    bignum_modpow(&s, &e, &n, &m);
+
+    unsigned char decoded[256];
+    bn_to_bytes(&m, decoded, mod_len);
+
+    /* 0x00 0x01 ... padding ... 0x00 DigestInfo */
+    if (decoded[0] != 0x00 || decoded[1] != 0x01) return -1;
+    int k = 2;
+    while (k < mod_len && decoded[k] == 0xFF) k++;
+    if (k < 10 || k >= mod_len || decoded[k] != 0x00) return -1;  /* en az 8 FF */
+    k++;  /* 0x00'dan sonra */
+
+    if (k + di_len + digest_len > mod_len) return -1;
+    if (memcmp(decoded + k, digestinfo_sha256, di_len) != 0) return -1;
+    if (memcmp(decoded + k + di_len, digest, digest_len) != 0) return -1;
+    return 0;
 }
 
 #ifdef RSA_TEST_MAIN

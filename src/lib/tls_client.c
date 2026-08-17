@@ -19,10 +19,12 @@
 #include <stdio.h>
 #endif
 #include "../include/tls.h"
+#include "../include/x509.h"
 
 /* dış API (tls_prf/tls_record/tls_handshake/rsa) */
 extern int  tls_prf_sha256(const uint8_t *secret, size_t secret_len,
-                           const char *label, const uint8_t *seed, size_t seed_len,
+                           const char *label,
+                           const uint8_t *seed, size_t seed_len,
                            uint8_t *out, size_t out_len);
 extern int  tls12_key_block(const uint8_t master[48],
                             const uint8_t server_random[32],
@@ -37,30 +39,40 @@ extern int  tls_record_decrypt(const uint8_t mac_key[32], const uint8_t enc_key[
                                const uint8_t *in, size_t in_len,
                                uint8_t *out, size_t out_cap, size_t *out_len);
 extern int  tls_build_client_hello(const uint8_t random[32],
-                                   const uint8_t *session_id, size_t session_id_len,
-                                   const char *host,
-                                   uint8_t *out, size_t out_cap, size_t *out_len);
+                                    const uint8_t *session_id, size_t session_id_len,
+                                    const char *host,
+                                    uint8_t *out, size_t out_cap, size_t *out_len);
 extern int  tls_parse_server_hello(const uint8_t *in, size_t in_len,
-                                   uint8_t server_random[32],
-                                   uint16_t *cipher_suite, uint8_t *compression);
+                                    uint8_t server_random[32],
+                                    uint16_t *cipher_suite, uint8_t *compression);
 extern int  tls_parse_certificate(const uint8_t *in, size_t in_len,
-                                  uint8_t *leaf_der, size_t leaf_cap, size_t *leaf_len);
+                                   uint8_t *leaf_der, size_t leaf_cap, size_t *leaf_len);
 extern int  tls_parse_server_hello_done(const uint8_t *in, size_t in_len);
 extern int  tls_build_client_key_exchange(const uint8_t premaster[48],
-                                          const uint8_t *server_modulus, int server_mod_len,
-                                          unsigned int server_exponent,
-                                          uint8_t *out, size_t out_cap, size_t *out_len);
+                                           const uint8_t *server_modulus, int server_mod_len,
+                                           unsigned int server_exponent,
+                                           uint8_t *out, size_t out_cap, size_t *out_len);
 extern int  tls_master_secret(const uint8_t premaster[48],
                               const uint8_t client_random[32],
                               const uint8_t server_random[32],
                               uint8_t master[48]);
 extern int  tls_finished_verify_data(const uint8_t master[48], const char *label,
-                                     const sha256_context *hs_hash,
-                                     uint8_t verify[12]);
+                                      const sha256_context *hs_hash,
+                                      uint8_t verify[12]);
 extern void tls_build_change_cipher_spec(uint8_t out[6]);
 extern int  x509_extract_rsa_public_key(const unsigned char *cert_der, int cert_len,
-                                        unsigned char *out_modulus, int *out_mod_len,
-                                        unsigned int *out_exponent);
+                                         unsigned char *out_modulus, int *out_mod_len,
+                                         unsigned int *out_exponent);
+extern int  x509_verify_chain(const unsigned char **certs, const int *cert_lens, int n,
+                              const unsigned char **trusted_cas, const int *trusted_ca_lens, int n_ca);
+extern int  trust_store_load_blob(const uint8_t *data, int size);
+extern int  trust_store_get_certs(const unsigned char ***out_certs, int **out_lens, int *out_count);
+extern int  tls_session_cache_store(tls_client_t *c, const uint8_t *session_id, size_t session_id_len,
+                                    const uint8_t master[48], uint32_t time);
+int  tls_session_cache_find(tls_client_t *c, const uint8_t *session_id, size_t session_id_len,
+                            uint8_t master[48]);
+void tls_session_cache_prune(tls_client_t *c, uint32_t current_time);
+extern int  time_get_unix(int64_t *out_ts);
 
 void tls_client_init(tls_client_t *c, const tls_net_t *net,
                      const uint8_t client_random[32],
@@ -88,22 +100,93 @@ void tls_client_init(tls_client_t *c, const tls_net_t *net,
     sha256_init(&c->hs_hash);
 }
 
-int tls_client_last_alert(tls_client_t *c, uint8_t *level, uint8_t *desc) {
-    if (level) *level = c->last_alert_level;
-    if (desc)  *desc  = c->last_alert_desc;
-    return c->last_alert_desc ? 0 : -1;
+/* Session cache functions */
+int tls_session_cache_store(tls_client_t *c, const uint8_t *session_id, size_t session_id_len,
+                            const uint8_t master[48], uint32_t time) {
+    if (!c || !session_id || session_id_len == 0 || session_id_len > TLS_SESSION_ID_MAX)
+        return TLS_ERR_PROTOCOL;
+    if (!master) return TLS_ERR_PROTOCOL;
+
+    int best_slot = -1;
+    uint32_t oldest = 0xFFFFFFFF;
+    for (int i = 0; i < TLS_SESSION_CACHE; i++) {
+        if (!c->session_cache[i].valid) {
+            best_slot = i;
+            break;
+        }
+        if (c->session_cache[i].created_time < oldest) {
+            oldest = c->session_cache[i].created_time;
+            best_slot = i;
+        }
+    }
+    if (best_slot == -1) return TLS_ERR_MSG_TOO_LARGE;
+
+    c->session_cache[best_slot].session_id_len = session_id_len;
+    memcpy(c->session_cache[best_slot].session_id, session_id, session_id_len);
+    memcpy(c->session_cache[best_slot].master, master, 48);
+    c->session_cache[best_slot].created_time = time;
+    c->session_cache[best_slot].valid = 1;
+    return TLS_OK;
+}
+
+int tls_session_cache_find(tls_client_t *c, const uint8_t *session_id, size_t session_id_len,
+                           uint8_t master[48]) {
+    if (!c || !session_id || session_id_len == 0 || session_id_len > TLS_SESSION_ID_MAX)
+        return TLS_ERR_PROTOCOL;
+    if (!master) return TLS_ERR_PROTOCOL;
+
+    for (int i = 0; i < TLS_SESSION_CACHE; i++) {
+        if (!c->session_cache[i].valid) continue;
+        if (c->session_cache[i].session_id_len != session_id_len) continue;
+        if (memcmp(c->session_cache[i].session_id, session_id, session_id_len) == 0) {
+            extern int time_get_unix(int64_t *out_ts);
+            int64_t now;
+            if (time_get_unix(&now) >= 0) {
+                if ((uint32_t)now - c->session_cache[i].created_time > TLS_SESSION_TIMEOUT) {
+                    c->session_cache[i].valid = 0;
+                    continue;
+                }
+            }
+            memcpy(master, c->session_cache[i].master, 48);
+            return TLS_OK;
+        }
+    }
+    return TLS_ERR_PROTOCOL;
+}
+
+void tls_session_cache_prune(tls_client_t *c, uint32_t current_time) {
+    for (int i = 0; i < TLS_SESSION_CACHE; i++) {
+        if (c->session_cache[i].valid &&
+            current_time - c->session_cache[i].created_time > TLS_SESSION_TIMEOUT) {
+            c->session_cache[i].valid = 0;
+        }
+    }
 }
 
 /* ---- yapimci yardimcilar ---- */
 
-static int put3(uint8_t *b, size_t v) {   /* 24-bit */
+static int put3(uint8_t *b, size_t v) {
     b[0] = (uint8_t)((v >> 16) & 0xff);
     b[1] = (uint8_t)((v >> 8) & 0xff);
     b[2] = (uint8_t)(v & 0xff);
     return 0;
 }
 
-/* bir record gonderir. encrypted=1 ise tls_record_encrypt, degilse duz. */
+static int put24(uint8_t *out, size_t out_cap, size_t pos, size_t v) {
+    if (pos + 3 > out_cap) return -1;
+    out[pos]     = (uint8_t)((v >> 16) & 0xff);
+    out[pos + 1] = (uint8_t)((v >> 8) & 0xff);
+    out[pos + 2] = (uint8_t)(v & 0xff);
+    return 0;
+}
+
+static int put16(uint8_t *out, size_t out_cap, size_t pos, size_t v) {
+    if (pos + 2 > out_cap) return -1;
+    out[pos]     = (uint8_t)((v >> 8) & 0xff);
+    out[pos + 1] = (uint8_t)(v & 0xff);
+    return 0;
+}
+
 static int net_send_record(tls_client_t *c, uint8_t type,
                            const uint8_t *payload, size_t payload_len,
                            int encrypted) {
@@ -127,24 +210,6 @@ static int net_send_record(tls_client_t *c, uint8_t type,
         out[4] = (uint8_t)(olen & 0xff);
         if (c->net.send(c->net.ctx, out, olen + 5) != 0) return TLS_ERR_IO;
         c->write_seq++;
-#ifdef TLS_DUMP
-        if (type == CT_HANDSHAKE) {
-            fprintf(stderr, "TLS_DUMP hdr=%02x%02x%02x%02x%02x plen=%zu",
-                    out[0], out[1], out[2], out[3], out[4], olen);
-            for (size_t i = 5; i < olen + 5; i++) fprintf(stderr, "%02x", out[i]);
-            fprintf(stderr, " mac=%02x", c->client_mac_key[0]);
-            for (int i = 1; i < 32; i++) fprintf(stderr, "%02x", c->client_mac_key[i]);
-            fprintf(stderr, " enc=%02x", c->client_enc_key[0]);
-            for (int i = 1; i < 16; i++) fprintf(stderr, "%02x", c->client_enc_key[i]);
-            fprintf(stderr, " smac=%02x", c->server_mac_key[0]);
-            for (int i = 1; i < 32; i++) fprintf(stderr, "%02x", c->server_mac_key[i]);
-            fprintf(stderr, " senc=%02x", c->server_enc_key[0]);
-            for (int i = 1; i < 16; i++) fprintf(stderr, "%02x", c->server_enc_key[i]);
-            fprintf(stderr, " master=%02x", c->master[0]);
-            for (int i = 1; i < 48; i++) fprintf(stderr, "%02x", c->master[i]);
-            fprintf(stderr, "\n");
-        }
-#endif
         return TLS_OK;
     }
 
@@ -156,11 +221,6 @@ static int net_send_record(tls_client_t *c, uint8_t type,
     return TLS_OK;
 }
 
-/*
- * Bir record okur (header + payload). encrypted=1 ise çozer ve tip
- * dogrular; degilse ham payload verir. record tipi *recv_type'e yazilir.
- * Payload (cozulmus veya ham) rec_buf'a gelir, uzunlugu *plen.
- */
 static int net_recv_record(tls_client_t *c, int encrypted,
                            uint8_t *recv_type, size_t *plen) {
     uint8_t hdr[5];
@@ -194,29 +254,22 @@ static int net_recv_record(tls_client_t *c, int encrypted,
     return TLS_OK;
 }
 
-/* gelen record alert ise isle; fatal ise hata kodu. */
 static int handle_alert(tls_client_t *c, const uint8_t *payload, size_t len) {
     if (len < 2) return TLS_ERR_PROTOCOL;
     c->last_alert_level = payload[0];
     c->last_alert_desc  = payload[1];
-    if (payload[0] == 2) return TLS_ERR_ALERT_FATAL;  /* fatal */
-    return TLS_OK;                                    /* warning: kaydet, devam */
+    if (payload[0] == 2) return TLS_ERR_ALERT_FATAL;
+    return TLS_OK;
 }
 
-/*
- * Handshake mesaji alir. expected_type ile eslesen TAM bir mesaj
- * dondurur. Gerekirse birden fazla record okur; parcali handshake
- * mesajlari hs_buf'ta biriktirilir. Alert/CCS uygun sekilde islenir.
- */
 static int hs_recv(tls_client_t *c, uint8_t expected_type,
                    uint8_t *out, size_t out_cap, size_t *out_len) {
     for (;;) {
-        /* hs_buf'ta hazir tam mesaj var mi? */
         while (c->hs_off + 4 <= c->hs_len) {
             const uint8_t *m = c->hs_buf + c->hs_off;
             size_t mlen = 4 + ((size_t)m[1] << 16) + ((size_t)m[2] << 8) + m[3];
             if (mlen > TLS_MAX_HS_MSG) return TLS_ERR_MSG_TOO_LARGE;
-            if (c->hs_off + mlen > c->hs_len) break;      /* eksik: daha bekle */
+            if (c->hs_off + mlen > c->hs_len) break;
             if (m[0] == expected_type) {
                 if (mlen > out_cap) return TLS_ERR_MSG_TOO_LARGE;
                 memcpy(out, m, mlen);
@@ -225,12 +278,10 @@ static int hs_recv(tls_client_t *c, uint8_t expected_type,
                 if (c->hs_off == c->hs_len) { c->hs_off = c->hs_len = 0; }
                 return TLS_OK;
             }
-            /* beklenmedik tip: hs_buf'ta atla, dongu surer */
             c->hs_off += mlen;
             if (c->hs_off == c->hs_len) { c->hs_off = c->hs_len = 0; }
         }
 
-        /* hs_buf bosalirsa tamponu sifirla */
         if (c->hs_off && c->hs_off == c->hs_len) { c->hs_off = c->hs_len = 0; }
         if (c->hs_off > 0) {
             memmove(c->hs_buf, c->hs_buf + c->hs_off, c->hs_len - c->hs_off);
@@ -248,10 +299,10 @@ static int hs_recv(tls_client_t *c, uint8_t expected_type,
             continue;
         }
         if (type == CT_CHANGE_CIPHER_SPEC) {
-            return TLS_ERR_PROTOCOL;       /* bu asama icin beklenmiyor */
+            return TLS_ERR_PROTOCOL;
         }
         if (type == CT_APPLICATION_DATA) {
-            return TLS_ERR_PROTOCOL;       /* handshake sirasinda app data */
+            return TLS_ERR_PROTOCOL;
         }
         if (type != CT_HANDSHAKE) return TLS_ERR_PROTOCOL;
 
@@ -260,8 +311,6 @@ static int hs_recv(tls_client_t *c, uint8_t expected_type,
         c->hs_len += plen;
     }
 }
-
-/* ---- anahtar turetimi ---- */
 
 static int setup_keys(tls_client_t *c) {
     uint8_t kb[104];
@@ -274,16 +323,23 @@ static int setup_keys(tls_client_t *c) {
     return TLS_OK;
 }
 
-/* ---- handshake ---- */
-
 int tls_client_handshake(tls_client_t *c) {
     uint8_t msg[TLS_MAX_HS_MSG];
     size_t mlen;
     int rc;
+    int resumption = 0;
 
     if (c->state == TLS_STATE_CONNECTED) return TLS_OK;
 
-    /* 1. ClientHello (plaintext record) */
+    /* Check session cache for resumption before starting handshake */
+    uint8_t cached_master[48];
+    int has_cached_session = 0;
+    if (c->session_id_len > 0 && c->session_id_len <= TLS_SESSION_ID_MAX) {
+        if (tls_session_cache_find(c, c->session_id, c->session_id_len, c->master) == TLS_OK) {
+            has_cached_session = 1;
+        }
+    }
+
     rc = tls_build_client_hello(c->client_random, c->session_id, c->session_id_len,
                                 c->sni_host, msg, sizeof msg, &mlen);
     if (rc != 0) return c->error = TLS_ERR_PROTOCOL;
@@ -292,131 +348,166 @@ int tls_client_handshake(tls_client_t *c) {
     if (rc != TLS_OK) return c->error = rc;
     c->step = 1;
 
-    /* 2. ServerHello */
+    uint8_t srand[32]; uint16_t cs = 0; uint8_t cm = 0xff;
+    rc = hs_recv(c, 2, msg, sizeof msg, &mlen);
+    if (rc != TLS_OK) return c->error = rc;
+    rc = tls_parse_server_hello(msg, mlen, srand, &cs, &cm);
+    if (rc != 0) return c->error = TLS_ERR_PROTOCOL;
+    memcpy(c->server_random, srand, 32);
+    sha256_update(&c->hs_hash, msg, mlen);
+    c->step = 2;
+
+    uint8_t server_session_id[TLS_SESSION_ID_MAX];
+    size_t server_session_id_len = 0;
     {
-        uint8_t srand[32]; uint16_t cs = 0; uint8_t cm = 0xff;
-        rc = hs_recv(c, 2, msg, sizeof msg, &mlen);      /* 2 = ServerHello */
-        if (rc != TLS_OK) return c->error = rc;
-        rc = tls_parse_server_hello(msg, mlen, srand, &cs, &cm);
-        if (rc != 0) return c->error = TLS_ERR_PROTOCOL;
-        memcpy(c->server_random, srand, 32);
-        sha256_update(&c->hs_hash, msg, mlen);
-#ifdef TLS_DUMP
-        fprintf(stderr, "TLS_DUMP sr=%02x", c->server_random[0]);
-        for (int i = 1; i < 32; i++) fprintf(stderr, "%02x", c->server_random[i]);
-        fprintf(stderr, "\n");
-#endif
-        c->step = 2;
+        const uint8_t *p = msg + 4;
+        if (mlen >= 38) {
+            p += 2;
+            p += 32;
+            if (p < msg + mlen) {
+                uint8_t sid_len = *p++;
+                if (sid_len > 0 && sid_len <= TLS_SESSION_ID_MAX && p + sid_len <= msg + mlen) {
+                    memcpy(server_session_id, p, sid_len);
+                    server_session_id_len = sid_len;
+                }
+            }
+        }
     }
 
-    /* 3. Certificate -> leaf DER -> RSA public key */
-    {
-        uint8_t leaf[8192];
-        size_t leaf_len;
+    if (has_cached_session &&
+        server_session_id_len == c->session_id_len &&
+        memcmp(server_session_id, c->session_id, c->session_id_len) == 0) {
+        resumption = 1;
+    }
+
+    /* Certificate chain -> parse full chain -> verify against trusted CAs */
+    if (!resumption) {
         unsigned char mod[256];
         int mod_len;
         unsigned int exp;
-        rc = hs_recv(c, 11, msg, sizeof msg, &mlen);     /* 11 = Certificate */
-        if (rc != TLS_OK) return c->error = rc;
-        rc = tls_parse_certificate(msg, mlen, leaf, sizeof leaf, &leaf_len);
-        if (rc != 0) return c->error = TLS_ERR_PROTOCOL;
-        rc = x509_extract_rsa_public_key(leaf, (int)leaf_len, mod, &mod_len, &exp);
-        if (rc != 0) return c->error = TLS_ERR_CRYPTO;
-        sha256_update(&c->hs_hash, msg, mlen);
-        /* TOFU icin leaf sertifika parmak izi (SHA-256) */
-        sha256_hash(leaf, leaf_len, c->peer_cert_hash);
-        c->peer_cert_hash_valid = 1;
-        c->step = 3;
-        /* sonraki adimda kullanmak icin mod/exp'i saklayamayiz (malloc yok):
-           ClientKeyExchange'i burada dogrudan hazirlayip sonra gondermek yerine
-           adim 5'te tekrar cikaririz. Hafif maliyet, sifir heap. */
 
-        /* 4. ServerHelloDone */
-        rc = hs_recv(c, 14, msg, sizeof msg, &mlen);     /* 14 = ServerHelloDone */
+        rc = hs_recv(c, 11, msg, sizeof msg, &mlen);
+        if (rc != TLS_OK) return c->error = rc;
+        sha256_update(&c->hs_hash, msg, mlen);
+
+        const unsigned char *p = msg + 4;
+        const unsigned char *end = msg + mlen;
+        if (end - p < 3) return c->error = TLS_ERR_PROTOCOL;
+        size_t list_len = ((size_t)p[0] << 16) | ((size_t)p[1] << 8) | p[2];
+        p += 3;
+        if ((size_t)(end - p) != list_len) return c->error = TLS_ERR_PROTOCOL;
+
+        const unsigned char *certs_data[16];
+        int certs_data_lens[16];
+        int n = 0;
+        while (p < end && n < 16) {
+            if (end - p < 3) return c->error = TLS_ERR_PROTOCOL;
+            size_t cl = ((size_t)p[0] << 16) | ((size_t)p[1] << 8) | p[2];
+            p += 3;
+            if ((size_t)(end - p) < cl) return c->error = TLS_ERR_PROTOCOL;
+            certs_data[n] = p;
+            certs_data_lens[n] = (int)cl;
+            n++;
+            p += cl;
+        }
+        if (n == 0) return c->error = TLS_ERR_PROTOCOL;
+
+        rc = x509_extract_rsa_public_key(certs_data[0], certs_data_lens[0],
+                                         mod, &mod_len, &exp);
+        if (rc != 0) return c->error = TLS_ERR_CRYPTO;
+
+        const unsigned char **ca_certs = NULL;
+        int *ca_lens = NULL;
+        int n_ca = 0;
+        rc = trust_store_get_certs(&ca_certs, &ca_lens, &n_ca);
+        if (rc == 0 && n_ca > 0) {
+            rc = x509_verify_chain(certs_data, certs_data_lens, n, ca_certs, ca_lens, n_ca);
+            if (rc != 0) return c->error = TLS_ERR_CRYPTO;
+        } else {
+        }
+        c->peer_cert_hash_valid = 1;
+        sha256_hash(certs_data[0], certs_data_lens[0], c->peer_cert_hash);
+
+        c->step = 3;
+
+        rc = hs_recv(c, 14, msg, sizeof msg, &mlen);
         if (rc != TLS_OK) return c->error = rc;
         rc = tls_parse_server_hello_done(msg, mlen);
         if (rc != 0) return c->error = TLS_ERR_PROTOCOL;
         sha256_update(&c->hs_hash, msg, mlen);
         c->step = 4;
 
-        /* 5. premaster + master + keyler */
-        c->premaster[0] = 3; c->premaster[1] = 3;
-        memcpy(c->premaster + 2, c->premaster_random, 46);
-        rc = tls_master_secret(c->premaster, c->client_random, c->server_random,
-                               c->master);
-        if (rc != 0) return c->error = TLS_ERR_CRYPTO;
-        rc = setup_keys(c);
-        if (rc != TLS_OK) return c->error = rc;
+        if (resumption) {
+            rc = setup_keys(c);
+            if (rc != 0) return c->error = TLS_ERR_CRYPTO;
+        } else {
+            c->premaster[0] = 3; c->premaster[1] = 3;
+            memcpy(c->premaster + 2, c->premaster_random, 46);
+            rc = tls_master_secret(c->premaster, c->client_random, c->server_random,
+                                   c->master);
+            if (rc != 0) return c->error = TLS_ERR_CRYPTO;
+            rc = setup_keys(c);
+            if (rc != 0) return c->error = TLS_ERR_CRYPTO;
 
-        /* 6. ClientKeyExchange (plaintext record, henuz sifresiz) */
-        rc = tls_build_client_key_exchange(c->premaster, mod, mod_len, exp,
-                                           msg, sizeof msg, &mlen);
-        if (rc != 0) return c->error = TLS_ERR_CRYPTO;
-        sha256_update(&c->hs_hash, msg, mlen);
-        rc = net_send_record(c, CT_HANDSHAKE, msg, mlen, 0);
-        if (rc != TLS_OK) return c->error = rc;
-        c->step = 5;
-    }
-
-    /* 7. ChangeCipherSpec (plaintext) */
-    {
-        uint8_t ccs[6];
-        tls_build_change_cipher_spec(ccs);
-        rc = net_send_record(c, CT_CHANGE_CIPHER_SPEC, ccs + 5, 1, 0);
-        if (rc != TLS_OK) return c->error = rc;
-        /* RFC 5246 6.1: cipher state aktif olunca seq sifir */
-        c->write_seq = 0;
-        c->step = 6;
-    }
-
-    /* 8. Client Finished (sifreli record, client write keylerle) */
-    {
-        uint8_t verify[12];
-        rc = tls_finished_verify_data(c->master, "client finished", &c->hs_hash,
-                                      verify);
-        if (rc != 0) return c->error = TLS_ERR_CRYPTO;
-        uint8_t fin[4 + 12];
-        fin[0] = 20; put3(fin + 1, 12);
-        memcpy(fin + 4, verify, 12);
-        sha256_update(&c->hs_hash, fin, 16);
-        rc = net_send_record(c, CT_HANDSHAKE, fin, 16, 1);
-        if (rc != TLS_OK) return c->error = rc;
-        c->step = 7;
-    }
-
-    /* 9. Server ChangeCipherSpec (plaintext) */
-    {
-        uint8_t type; size_t plen;
-        rc = net_recv_record(c, 0, &type, &plen);
-        if (rc != TLS_OK) return c->error = rc;
-        if (type != CT_CHANGE_CIPHER_SPEC || plen != 1 || c->rec_buf[0] != 1)
-            return c->error = TLS_ERR_PROTOCOL;
-        /* RFC 5246 6.1: cipher state aktif olunca seq sifir */
-        c->read_seq = 0;
-        c->step = 8;
-    }
-
-    /* 10. Server Finished (sifreli record, server read keylerle) */
-    {
-        uint8_t type; size_t plen;
-        for (;;) {
-            rc = net_recv_record(c, 1, &type, &plen);
+            rc = tls_build_client_key_exchange(c->premaster, mod, mod_len, exp,
+                                               msg, sizeof msg, &mlen);
+            if (rc != 0) return c->error = TLS_ERR_CRYPTO;
+            sha256_update(&c->hs_hash, msg, mlen);
+            rc = net_send_record(c, CT_HANDSHAKE, msg, mlen, 0);
             if (rc != TLS_OK) return c->error = rc;
-            if (type == CT_ALERT) {
-                rc = handle_alert(c, c->rec_buf, plen);
-                if (rc != TLS_OK) return rc;
-                continue;
-            }
-            if (type == CT_HANDSHAKE) break;
-            return c->error = TLS_ERR_PROTOCOL;
+            c->step = 5;
         }
-        if (plen != 16 || c->rec_buf[0] != 20) return c->error = TLS_ERR_PROTOCOL;
-        uint8_t verify[12];
-        rc = tls_finished_verify_data(c->master, "server finished", &c->hs_hash,
-                                      verify);
-        if (rc != 0) return c->error = TLS_ERR_CRYPTO;
-        if (memcmp(c->rec_buf + 4, verify, 12) != 0) return c->error = TLS_ERR_CRYPTO;
-        c->step = 9;
+    }
+
+    uint8_t ccs[6];
+    tls_build_change_cipher_spec(ccs);
+    rc = net_send_record(c, CT_CHANGE_CIPHER_SPEC, ccs + 5, 1, 0);
+    if (rc != TLS_OK) return c->error = rc;
+    c->write_seq = 0;
+    c->step = 6;
+
+    uint8_t verify[12];
+    rc = tls_finished_verify_data(c->master, "client finished", &c->hs_hash,
+                                  verify);
+    if (rc != 0) return c->error = TLS_ERR_CRYPTO;
+    uint8_t fin[4 + 12];
+    fin[0] = 20; put3(fin + 1, 12);
+    memcpy(fin + 4, verify, 12);
+    sha256_update(&c->hs_hash, fin, 16);
+    rc = net_send_record(c, CT_HANDSHAKE, fin, 16, 1);
+    if (rc != TLS_OK) return c->error = rc;
+    c->step = 7;
+
+    uint8_t type; size_t plen;
+    rc = net_recv_record(c, 0, &type, &plen);
+    if (rc != TLS_OK) return c->error = rc;
+    if (type != CT_CHANGE_CIPHER_SPEC || plen != 1 || c->rec_buf[0] != 1)
+        return c->error = TLS_ERR_PROTOCOL;
+    c->read_seq = 0;
+    c->step = 8;
+
+    for (;;) {
+        rc = net_recv_record(c, 1, &type, &plen);
+        if (rc != TLS_OK) return c->error = rc;
+        if (type == CT_ALERT) {
+            rc = handle_alert(c, c->rec_buf, plen);
+            if (rc != TLS_OK) return rc;
+            continue;
+        }
+        if (type == CT_HANDSHAKE) break;
+        return c->error = TLS_ERR_PROTOCOL;
+    }
+    if (plen != 16 || c->rec_buf[0] != 20) return c->error = TLS_ERR_PROTOCOL;
+    rc = tls_finished_verify_data(c->master, "server finished", &c->hs_hash,
+                                  verify);
+    if (rc != 0) return c->error = TLS_ERR_CRYPTO;
+    if (memcmp(c->rec_buf + 4, verify, 12) != 0) return c->error = TLS_ERR_CRYPTO;
+    c->step = 9;
+
+    if (!resumption && c->session_id_len > 0) {
+        if (time_get_unix((int64_t *)&c->session_cache[0].created_time) >= 0) {
+            tls_session_cache_store(c, c->session_id, c->session_id_len, c->master, (uint32_t)c->session_cache[0].created_time);
+        }
     }
 
     c->state = TLS_STATE_CONNECTED;
@@ -440,8 +531,6 @@ int tls_client_read(tls_client_t *c, uint8_t *out, size_t cap, size_t *out_len) 
         if (type == CT_ALERT) {
             rc = handle_alert(c, c->rec_buf, plen);
             if (rc != TLS_OK) return rc;
-            /* warning close_notify (desc 0): baglantinin temiz kapandigini
-               cagiran tarafa *out_len=0 ile bildir (8s timeout bekletmez). */
             if (c->rec_buf[0] == 1 && c->rec_buf[1] == 0) {
                 if (out_len) *out_len = 0;
                 return TLS_OK;

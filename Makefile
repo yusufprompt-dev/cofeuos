@@ -27,7 +27,7 @@ CFLAGS_EFI = -target x86_64-unknown-windows \
              -fshort-wchar -mno-red-zone \
              -Wall -Wextra \
              -I$(EFI_INC) -I$(EFI_INC)/x86_64 \
-             -DEFI_FUNCTION_WRAPPER $(NETWORK_DEBUG_FLAGS) $(NETWORK_CONFIG_FLAGS)
+           -DEFI_FUNCTION_WRAPPER -DUEFI_BUILD $(NETWORK_DEBUG_FLAGS) $(NETWORK_CONFIG_FLAGS)
 
 # ─── Kernel Derleme Bayrakları ─────────────────────────
 CFLAGS_K = -target x86_64-unknown-windows \
@@ -37,7 +37,7 @@ CFLAGS_K = -target x86_64-unknown-windows \
            -Wall -Wextra \
            -ffunction-sections -fdata-sections \
            -I$(EFI_INC) -I$(EFI_INC)/x86_64 \
-           -DEFI_FUNCTION_WRAPPER $(NETWORK_DEBUG_FLAGS) $(NETWORK_CONFIG_FLAGS)
+           -DEFI_FUNCTION_WRAPPER -DUEFI_BUILD $(NETWORK_DEBUG_FLAGS) $(NETWORK_CONFIG_FLAGS)
 
 # ─── Linker Bayrakları ─────────────────────────────────
 LDFLAGS = -subsystem:efi_application \
@@ -65,25 +65,48 @@ OBJS = $(BOOT_DIR)/efi_main.o \
        $(SRC_DIR)/lib/tls_record.o \
        $(SRC_DIR)/lib/tls_handshake.o \
        $(SRC_DIR)/lib/tls_client.o \
+       $(SRC_DIR)/lib/x509.o \
+       $(SRC_DIR)/lib/trust_store.o \
+       $(SRC_DIR)/lib/ec.o \
+       $(SRC_DIR)/lib/sched.o \
+       $(SRC_DIR)/lib/time.o \
        $(SRC_DIR)/lib/html.o \
        $(SRC_DIR)/lib/css.o \
        $(SRC_DIR)/lib/layout.o \
        $(SRC_DIR)/lib/web_mem.o \
        $(SRC_DIR)/lib/js.o \
+       $(SRC_DIR)/lib/wifi.o \
+       $(SRC_DIR)/lib/wpa_supplicant.o \
+       $(SRC_DIR)/lib/dhcp.o \
+       $(SRC_DIR)/lib/bluetooth.o \
+       $(SRC_DIR)/lib/sound.o \
+       $(SRC_DIR)/lib/usb.o \
+       $(SRC_DIR)/lib/ssh.o \
+       $(SRC_DIR)/lib/pkgmgr.o \
+       $(SRC_DIR)/lib/sysmon.o \
+       $(SRC_DIR)/lib/editor.o \
+       $(SRC_DIR)/lib/calendar.o \
+       $(SRC_DIR)/lib/games.o \
+       $(SRC_DIR)/lib/mail.o \
+       $(SRC_DIR)/lib/pdf.o \
+       $(SRC_DIR)/lib/music.o \
        font.o
 
 # ─── Hedefler ──────────────────────────────────────────
-chkstk.o: chkstk.c
-	$(CC) $(CFLAGS_K) -c chkstk.c -o chkstk.o
+.DEFAULT_GOAL := all
 
 all: $(ISO_NAME)
+
+chkstk.o: chkstk.c
+	$(CC) $(CFLAGS_K) -c chkstk.c -o chkstk.o
 
 $(ISO_NAME): BOOTX64.EFI
 	rm -f $@
 	mkdir -p /tmp/cofeu_iso/EFI/BOOT
 	cp -r $(ISO_ROOT)/. /tmp/cofeu_iso/ 2>/dev/null || true
 	cp BOOTX64.EFI /tmp/cofeu_iso/EFI/BOOT/BOOTX64.EFI
-	xorriso -indev /dev/null -outdev $@ -map /tmp/cofeu_iso / -boot_image any path=/EFI/BOOT/BOOTX64.EFI -commit >/dev/null
+	cp BOOTX64.EFI /tmp/cofeu_iso/BOOTX64.EFI
+	xorriso -as mkisofs -o $@ -e BOOTX64.EFI -no-emul-boot /tmp/cofeu_iso
 	rm -rf /tmp/cofeu_iso
 	@echo ">>> $(ISO_NAME) hazir!"
 
@@ -152,6 +175,21 @@ $(SRC_DIR)/lib/tls_handshake.o: $(SRC_DIR)/lib/tls_handshake.c
 $(SRC_DIR)/lib/tls_client.o: $(SRC_DIR)/lib/tls_client.c
 	$(CC) $(CFLAGS_K) -c $< -o $@
 
+$(SRC_DIR)/lib/x509.o: $(SRC_DIR)/lib/x509.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/trust_store.o: $(SRC_DIR)/lib/trust_store.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/ec.o: $(SRC_DIR)/lib/ec.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/sched.o: $(SRC_DIR)/lib/sched.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/time.o: $(SRC_DIR)/lib/time.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
 $(SRC_DIR)/lib/html.o: $(SRC_DIR)/lib/html.c
 	$(CC) $(CFLAGS_K) -c $< -o $@
 
@@ -165,6 +203,51 @@ $(SRC_DIR)/lib/web_mem.o: $(SRC_DIR)/lib/web_mem.c
 	$(CC) $(CFLAGS_K) -c $< -o $@
 
 $(SRC_DIR)/lib/js.o: $(SRC_DIR)/lib/js.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/wifi.o: $(SRC_DIR)/lib/wifi.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/wpa_supplicant.o: $(SRC_DIR)/lib/wpa_supplicant.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/dhcp.o: $(SRC_DIR)/lib/dhcp.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/bluetooth.o: $(SRC_DIR)/lib/bluetooth.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/sound.o: $(SRC_DIR)/lib/sound.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/usb.o: $(SRC_DIR)/lib/usb.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/ssh.o: $(SRC_DIR)/lib/ssh.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/pkgmgr.o: $(SRC_DIR)/lib/pkgmgr.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/sysmon.o: $(SRC_DIR)/lib/sysmon.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/editor.o: $(SRC_DIR)/lib/editor.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/calendar.o: $(SRC_DIR)/lib/calendar.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/games.o: $(SRC_DIR)/lib/games.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/mail.o: $(SRC_DIR)/lib/mail.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/pdf.o: $(SRC_DIR)/lib/pdf.c
+	$(CC) $(CFLAGS_K) -c $< -o $@
+
+$(SRC_DIR)/lib/music.o: $(SRC_DIR)/lib/music.c
 	$(CC) $(CFLAGS_K) -c $< -o $@
 
 

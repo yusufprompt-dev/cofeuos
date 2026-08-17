@@ -47,6 +47,28 @@ typedef struct {
 #define MAX_GUI_WINDOWS 8
 #define GUI_TERM_ROWS   20
 #define GUI_TERM_COLS   80
+#define MAX_BROWSER_TABS 8
+#define TAB_TITLE_MAX  32
+
+/* ─── Browser Sekme Verisi ───────────────────────────────────── */
+typedef struct {
+    int active;                  /* sekme kullanımda mı */
+    char url_buf[128];
+    int  url_pos;
+    char page_buf[4096];
+    int  page_len;
+    int  page_scroll;
+    char page_base[160];
+    web_document_t *doc;
+    web_css_rule_t *css;
+    web_box_t      *layout;
+    int             page_h;
+    int             loading;
+    char title[TAB_TITLE_MAX];   /* sekme başlığı */
+    int history_pos;             /* geriye/ileri navigasyon için */
+    char history[10][160];       /* basit geçmiş */
+    int history_len;
+} browser_tab_t;
 
 typedef struct {
     int id;
@@ -63,17 +85,11 @@ typedef struct {
     char input_buf[128];
     int  input_pos;
 
-    /* Tarayıcı verileri */
-    char url_buf[128];
-    int  url_pos;
-    char page_buf[4096];
-    int  page_len;
-    int  page_scroll;
-    char page_base[160];      /* geçerli sayfanın tam URL'si */
-    web_document_t *doc;      /* DOM ağacı */
-    web_css_rule_t *css;      /* ayrıştırılmış stiller */
-    web_box_t      *layout;   /* yerleşim kutusu ağacı */
-    int             page_h;   /* yerleşim toplam yüksekliği */
+    /* Tarayıcı verileri - Sekmeli */
+    browser_tab_t tabs[MAX_BROWSER_TABS];
+    int           tab_count;
+    int           active_tab;    /* aktif sekme indeksi */
+    int           tab_bar_height;/* sekme çubuğu yüksekliği */
 
     /* Hesap makinesi verileri */
     char calc_disp[32];

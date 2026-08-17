@@ -1144,7 +1144,9 @@ static void js_log(const char *msg) {
 static js_value_t eval(js_ast_t *n, js_env_t *env);
 static js_value_t js_native_array_push(js_value_t *args, int nargs, void *ud);
 static js_value_t js_native_add_event_listener(js_value_t *args, int nargs, void *ud);
+static js_value_t js_native_remove_event_listener(js_value_t *args, int nargs, void *ud);
 static js_value_t js_native_set_timeout(js_value_t *args, int nargs, void *ud);
+static js_value_t js_native_clear_timeout(js_value_t *args, int nargs, void *ud);
 static int dom_get_prop(js_object_t *o, const char *key, js_value_t *out);
 static int dom_set_prop(js_object_t *o, const char *key, js_value_t v);
 
@@ -1551,6 +1553,54 @@ static js_value_t js_native_set_timeout(js_value_t *args, int nargs, void *ud) {
     t->next = g_timers;
     g_timers = t;
     return v_num((double)t->due_ms);
+}
+
+static js_value_t js_native_remove_event_listener(js_value_t *args, int nargs, void *ud) {
+    web_node_t *node = (web_node_t*)ud;
+    if (!node || nargs < 2 || args[0].type != JV_STR ||
+        (args[1].type != JV_FUNC && args[1].type != JV_NATIVE)) return v_undef();
+    const char *type = args[0].str;
+    js_value_t fn = args[1];
+    js_evt_t **p = &g_evts;
+    while (*p) {
+        js_evt_t *e = *p;
+        if (e->node == node && e->type && strcmp_ci(e->type, type) == 0 && e->fn.type == fn.type) {
+            if (e->fn.type == JV_FUNC) {
+                if (e->fn.as.fn == fn.as.fn) {
+                    *p = e->next;
+                    web_free(e->type);
+                    web_free(e);
+                    return v_undef();
+                }
+            } else if (e->fn.type == JV_NATIVE) {
+                if (e->fn.as.nf.fn == fn.as.nf.fn && e->fn.as.nf.ud == fn.as.nf.ud) {
+                    *p = e->next;
+                    web_free(e->type);
+                    web_free(e);
+                    return v_undef();
+                }
+            }
+        }
+        p = &e->next;
+    }
+    return v_undef();
+}
+
+static js_value_t js_native_clear_timeout(js_value_t *args, int nargs, void *ud) {
+    (void)ud;
+    if (nargs < 1 || args[0].type != JV_NUM) return v_undef();
+    unsigned int id = (unsigned int)args[0].num;
+    js_timer_t **p = &g_timers;
+    while (*p) {
+        js_timer_t *t = *p;
+        if ((unsigned int)t->due_ms == id) {
+            *p = t->next;
+            web_free(t);
+            return v_undef();
+        }
+        p = &t->next;
+    }
+    return v_undef();
 }
 
 /* ─── Yerlesikler ───────────────────────────────────────── */
@@ -2326,6 +2376,7 @@ static int dom_elem_get_prop(js_object_t *o, const char *key, js_value_t *out) {
     if (strcmp_ci(key, "querySelector") == 0) { *out = v_native(js_native_query_selector, n); return 1; }
     if (strcmp_ci(key, "querySelectorAll") == 0) { *out = v_native(js_native_query_selector_all, n); return 1; }
     if (strcmp_ci(key, "addEventListener") == 0) { *out = v_native(js_native_add_event_listener, n); return 1; }
+    if (strcmp_ci(key, "removeEventListener") == 0) { *out = v_native(js_native_remove_event_listener, n); return 1; }
     const char *av = web_node_attr(n, key);
     if (av) { *out = v_str(js_strdup(av)); return 1; }
     return 0;
@@ -2518,9 +2569,11 @@ static void js_install_builtins(js_env_t *g) {
         obj_set(win, "confirm", v_native(js_native_confirm, NULL));
         if (console) obj_set(win, "console", v_object(console));
         obj_set(win, "setTimeout", v_native(js_native_set_timeout, NULL));
+        obj_set(win, "clearTimeout", v_native(js_native_clear_timeout, NULL));
     }
     env_set(g, "window", v_object(win));
     env_set(g, "setTimeout", v_native(js_native_set_timeout, NULL));
+    env_set(g, "clearTimeout", v_native(js_native_clear_timeout, NULL));
 
     js_object_t *doc = obj_new(0);
     if (doc) doc->is_host = JS_HOST_DOCUMENT;

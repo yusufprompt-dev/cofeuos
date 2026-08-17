@@ -20,6 +20,9 @@
 #define TLS_REC_MAX_PAYLOAD  (16384 + 16 + 32 + 256) /* iv+mac+pad payi */
 #define TLS_VERIFY_DATA_LEN  12
 #define TLS_MASTER_LEN       48
+#define TLS_SESSION_ID_MAX   32
+#define TLS_SESSION_CACHE    4                     /* session cache boyutu */
+#define TLS_SESSION_TIMEOUT  3600                  /* session timeout (saniye) */
 
 /* record content type'lari */
 #define CT_CHANGE_CIPHER_SPEC 20
@@ -76,6 +79,15 @@ typedef struct tls_client {
     uint8_t peer_cert_hash[32];         /* leaf sertifika SHA-256 (TOFU icin) */
     int     peer_cert_hash_valid;
     const char *sni_host;               /* ClientHello SNI (NULL: extension yok) */
+
+    /* Session cache for resumption */
+    struct {
+        uint8_t session_id[TLS_SESSION_ID_MAX];
+        size_t  session_id_len;
+        uint8_t master[48];
+        uint32_t created_time;     /* Unix timestamp */
+        int     valid;
+    } session_cache[TLS_SESSION_CACHE];
 } tls_client_t;
 
 #define TLS_STATE_INIT        0
@@ -92,5 +104,12 @@ int  tls_client_write(tls_client_t *c, const uint8_t *data, size_t len);
 int  tls_client_read(tls_client_t *c, uint8_t *out, size_t cap, size_t *out_len);
 int  tls_client_last_alert(tls_client_t *c, uint8_t *level, uint8_t *desc);
 const char *tls_err_str(int err);
+
+/* Session cache API */
+int tls_session_cache_store(tls_client_t *c, const uint8_t *session_id, size_t session_id_len,
+                            const uint8_t master[48], uint32_t time);
+int tls_session_cache_find(tls_client_t *c, const uint8_t *session_id, size_t session_id_len,
+                           uint8_t master[48]);
+void tls_session_cache_prune(tls_client_t *c, uint32_t current_time);
 
 #endif /* TLS_H */

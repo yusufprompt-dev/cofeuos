@@ -13,6 +13,17 @@
 #include "../include/tls.h"
 
 extern fs_control_block g_fs;
+int g_tty_mode = 0;
+
+static void dbg_dec(unsigned long v);
+static void dbg_hex(unsigned long v);
+
+/* ─── Ağ işlemi ilerleme geri çağırması (UI donmaması için) ─── */
+typedef void (*net_progress_cb_t)(void);
+static net_progress_cb_t g_net_progress_cb = NULL;
+
+void net_set_progress_cb(net_progress_cb_t cb) { g_net_progress_cb = cb; }
+static inline void net_progress(void) { if (g_net_progress_cb) g_net_progress_cb(); }
 
 /* ─── Yapılar ──────────────────────────────────────────────── */
 typedef struct { unsigned char dst[6]; unsigned char src[6]; unsigned short type; } __attribute__((packed)) eth_hdr_t;
@@ -270,14 +281,36 @@ static void tls_store_fingerprint(const char *host, const unsigned char *fingerp
     for (int i = 0; host[i] && i < (int)sizeof(g_tls_trust_store[idx].host) - 1; i++) {
         g_tls_trust_store[idx].host[i] = host[i];
     }
-    for (int i = 0; i < 32; i++) g_tls_trust_store[idx].fingerprint[i] = fingerprint[i];
+for (int i = 0; i < 32; i++) g_tls_trust_store[idx].fingerprint[i] = fingerprint[i];
     for (int i = 0; i < 32; i++) g_tls_trust_store[idx].ca_fingerprint[i] = 0;
     g_tls_trust_store[idx].valid = 1;
     g_tls_trust_store[idx].has_ca = 0;
 }
 
+/* Trust store'u diske kaydet (TOFU kalıcılığı) */
+static void tls_save_trust_store(void) {
+    fs_write_file(&g_fs, "/config/tls_trust.bin", (char*)g_tls_trust_store, sizeof(g_tls_trust_store));
+}
 
-/* ARP Önbellek (gateway) */
+/* Trust store'u diskten yükle */
+static void tls_load_trust_store(void) {
+    char buf[sizeof(g_tls_trust_store)];
+    int len = fs_read_file(&g_fs, "/config/tls_trust.bin", buf, sizeof(buf));
+    if (len == (int)sizeof(g_tls_trust_store)) {
+        memcpy(g_tls_trust_store, buf, len);
+        /* Sayaci guncelle */
+        g_tls_trust_count = 0;
+        for (int i = 0; i < TLS_TRUST_STORE_SIZE; i++) {
+            if (g_tls_trust_store[i].valid && g_tls_trust_store[i].host[0]) g_tls_trust_count++;
+        }
+        NETWORK_DEBUG_LOG(L"[TLS] Trust store yuklendi: %d giris\r\n", g_tls_trust_count);
+    } else {
+        NETWORK_DEBUG_LOG(L"[TLS] Trust store bulunamadi/yeni\r\n");
+    }
+}
+
+
+ /* ARP Önbellek (gateway) */
 static unsigned char g_gateway_mac[6] = {0,0,0,0,0,0};
 static int g_gateway_mac_valid = 0;
 static int g_gateway_arp_fail_count = 0;
@@ -411,6 +444,7 @@ static int arp_resolve(unsigned char *target_ip, unsigned char *out_mac) {
     static unsigned char rx[1500];
     unsigned int rx_len = 0;
     for (int attempt = 0; attempt < 100; attempt++) {
+        net_progress();
         uefi_stall(10000); /* 10ms */
         if (raw_recv(rx, &rx_len) == 0 && rx_len >= 42) {
             unsigned short ether_type = __builtin_bswap16(*(unsigned short*)(rx + 12));
@@ -564,6 +598,7 @@ int dns_resolve(const char *domain, unsigned char *out_ip) {
         /* Yanit bekle: 1500x2ms = 3 saniye (ayni toplam sure, 5x daha sik poll —
            art arda hizli gelen paketlerin kacirilma riskini azaltir) */
         for (int attempt = 0; attempt < 1500; attempt++) {
+            net_progress();
             uefi_stall(2000);
             if (raw_recv(rx, &rx_len) != 0 || rx_len < 42) continue;
 
@@ -872,6 +907,8 @@ static int tcp_rst_closed_segment(ip4_hdr_t *rip, tcp_hdr_t *tcp) {
     unsigned short dstp = __builtin_bswap16(tcp->dst_port);
     if (tcp_closed_match(rip->src, srcp, dstp) < 0) return 0;
     if (tcp->flags & TCP_RST) return 1; /* RST'e RST ile cevap verilmez */
+    dbg_write("[TC] closed RST sp="); dbg_dec(srcp);
+    dbg_write(" dp="); dbg_dec(dstp); dbg_write("\n");
     /* RFC 793 reset üretimi: seq = gelen ACK (yoksa 0), ack = gelen seq +
        uzunluk (+ FIN). Böylece sunucunun kapanan bağlantıya retransmisyonu
        doğru numaralandırma ile tanınır ve kesilir (HATA 3). */
@@ -940,6 +977,8 @@ void network_init(void *st) {
         g_gateway_mac_valid = 1;
         NETWORK_DEBUG_LOG(L"[NET] Gateway ARP basarili\r\n");
     }
+    /* TLS trust store'u yukle (TOFU kalıcılığı) */
+    tls_load_trust_store();
 }
 
 int network_ping(unsigned char *dst_ip) {
@@ -999,6 +1038,14 @@ void network_get_ip(unsigned char *ip) {
     for (int i = 0; i < 4; i++) ip[i] = g_ip[i];
 }
 
+void network_get_gateway(unsigned char *gw) {
+    for (int i = 0; i < 4; i++) gw[i] = g_gateway[i];
+}
+
+void network_get_dns_server(unsigned char *dns) {
+    for (int i = 0; i < 4; i++) dns[i] = g_dns_server[i];
+}
+
 void network_set_dns(unsigned char *dns_ip) {
     for (int i = 0; i < 4; i++) g_dns_server[i] = dns_ip[i];
 }
@@ -1009,6 +1056,18 @@ int arp_test(unsigned char *target_ip, unsigned char *out_mac) {
 }
 
 /* ─── TCP Bağlantı ───────────────────────────────────────── */
+static void dbg_dec(unsigned long v) {
+    char b[12]; int i = 11; b[i] = 0;
+    if (v == 0) { dbg_write("0"); return; }
+    while (v && i > 0) { b[--i] = (char)('0' + (v % 10)); v /= 10; }
+    dbg_write(b + i);
+}
+static void dbg_hex(unsigned long v) {
+    char b[12]; int i = 11; b[i] = 0;
+    if (v == 0) { dbg_write("0"); return; }
+    while (v && i > 0) { b[--i] = "0123456789abcdef"[v & 0xf]; v >>= 4; }
+    dbg_write(b + i);
+}
 int tcp_connect(unsigned char *dst_ip, unsigned short port) {
     if (!dst_ip || !g_net) return -1;
     g_tcp_seq = 1000; g_tcp_ack = 0; g_tcp_local_port++;
@@ -1031,13 +1090,17 @@ int tcp_connect(unsigned char *dst_ip, unsigned short port) {
        kaldığı için gelen paketler düşürülmesin. */
     static unsigned char rx[1500]; unsigned int rx_len = 0;
     for (int syn_try = 0; syn_try < 3; syn_try++) {
+        dbg_write("[TC] syn try="); dbg_dec(syn_try + 1);
+        dbg_write(" port="); dbg_dec(port);
+        dbg_write(" lport="); dbg_dec(g_tcp_local_port); dbg_write("\n");
         NETWORK_DEBUG_LOG(L"[TCP] SYN gonderildi (deneme %d), yanit bekleniyor...\r\n", syn_try + 1);
-        if (send_tcp_packet(dst_ip, port, TCP_SYN, NULL, 0) != 0) return -1;
+        if (send_tcp_packet(dst_ip, port, TCP_SYN, NULL, 0) != 0) { dbg_write("[TC] SYN send FAIL\n"); return -1; }
 
         /* 2000×1ms = 2 saniye; dış döngü uyurken içte NIC kuyruğundaki BÜTÜN
            paketler anında boşaltılır (non-blocking poll), böylece SYN-ACK
            gecikmez ve ring sürekli boşalır. */
         for (int i = 0; i < 2000; i++) {
+            net_progress();
             for (;;) {
                 rx_len = 0; /* (HATA 1 kural c) paylaşılan uzunluk her alımdan önce sıfırlansın */
                 int rr = raw_recv(rx, &rx_len);
@@ -1053,23 +1116,28 @@ int tcp_connect(unsigned char *dst_ip, unsigned short port) {
                             rip->src[2] == dst_ip[2] && rip->src[3] == dst_ip[3] &&
                             __builtin_bswap16(tcp->dst_port) == g_tcp_local_port &&
                             __builtin_bswap16(tcp->src_port) == port);
+                dbg_write("[TC] rx sp="); dbg_dec(__builtin_bswap16(tcp->src_port));
+                dbg_write(" dp="); dbg_dec(__builtin_bswap16(tcp->dst_port));
+                dbg_write(" fl="); dbg_hex(tcp->flags);
+                dbg_write(" ours="); dbg_dec(ours); dbg_write("\n");
                 if (!ours) {
                     /* Kapalı bağlantı retransmisyonuysa tüket + RST (HATA 3) */
                     tcp_rst_closed_segment(rip, tcp);
                     continue;
                 }
 
-                if (tcp->flags & TCP_RST) { g_tcp_rst_received = 1; return -3; }
+                if (tcp->flags & TCP_RST) { g_tcp_rst_received = 1; dbg_write("[TC] RST\n"); return -3; }
 
                 if ((tcp->flags & (TCP_SYN | TCP_ACK)) == (TCP_SYN | TCP_ACK)) {
                     g_tcp_seq++;
                     g_tcp_ack = __builtin_bswap32(tcp->seq) + 1;
-                    send_tcp_packet(dst_ip, port, TCP_ACK, NULL, 0);
+                    int ack_send = send_tcp_packet(dst_ip, port, TCP_ACK, NULL, 0);
                     g_tcp_ack_sent = g_tcp_ack;
                     g_tcp_dup_count = 0;
                     for (int j = 0; j < 4; j++) g_tcp_remote_ip[j] = dst_ip[j];
                     g_tcp_remote_port = port;
                     g_tcp_connected = 1;
+                    dbg_write("[TC] SYNACK MATCH ack_send="); dbg_dec(ack_send); dbg_write("\n");
                     NETWORK_DEBUG_LOG(L"[TCP] SYN-ACK alindi, baglanti kuruldu\r\n");
                     return 0;
                 }
@@ -1081,6 +1149,8 @@ int tcp_connect(unsigned char *dst_ip, unsigned short port) {
     /* 3 SYN denemesi de boşa çıktı: sunucu hâlâ bu port'a SYN-ACK
        retransmisyonu gönderebilir; tuple'ı kapalı tablosuna ekle ki daha
        sonra gelecek retransmisyonlar RST ile kesilsin (ring'i doldurmasın). */
+    dbg_write("[TC] CONNECT FAIL port="); dbg_dec(port);
+    dbg_write(" lport="); dbg_dec(g_tcp_local_port); dbg_write("\n");
     tcp_closed_add(dst_ip, port, g_tcp_local_port);
     return -1;
 }
@@ -1178,6 +1248,7 @@ static int tcp_read_payload(unsigned char *buf, int maxlen) {
        az ~8 saniye dinle (8000 x 1ms) ki ilk birkaç retransmisyonu
        yakalayabilelim. Bu sure normal ve beklenen bir durum. */
     for (int i = 0; i < 8000; i++) {
+        net_progress();
         /* ── Non-blocking boşaltma: NIC kuyruğundaki BÜTÜN segmentleri
            gecikmeden oku, batch'leri TEK kümülatif ACK ile onayla. Bu,
            sunucunun ACK bekleyip dakikalarca retransmisyon yapmasını
@@ -1341,10 +1412,12 @@ static int tls_verify_host_fingerprint(const char *host, const unsigned char *fi
     int idx = tls_find_trust_entry(host);
     if (idx < 0) {
         tls_store_fingerprint(host, fingerprint);
+        tls_save_trust_store();
         return 0;
     }
     if (!g_tls_trust_store[idx].valid) {
         tls_store_fingerprint(host, fingerprint);
+        tls_save_trust_store();
         return 0;
     }
     if (g_tls_trust_store[idx].has_ca) {
@@ -1501,6 +1574,7 @@ static int tls_http_exchange(const char *host, const char *path,
     int total = 0, header_done = 0;
     size_t rlen;
     for (;;) {
+        net_progress();
         int rc = tls_client_read(&g_tls, rbuf, sizeof rbuf, &rlen);
         if (rc == TLS_OK && rlen == 0) break;   /* close_notify: temiz son */
         if (rc != TLS_OK) break;                /* IO hatasi / zaman asimi */
@@ -1611,6 +1685,7 @@ static int tcp_recv_response(char *buf, int maxlen) {
        kuyruğu anında tüketilir ve her segmentin ACK'i geciktirilmeden
        gönderilir. Böylece sunucu retransmisyon kilidinden kaçınılır. */
     for (int i = 0; i < 6000; i++) {
+        net_progress();
         int drained = 0;
         for (;;) {
             rx_len = 0; /* (HATA 1 kural c) paylaşılan uzunluk her alımdan önce sıfırlansın */
@@ -1781,6 +1856,346 @@ int http_post(const char *host, const char *path, const char *data, int data_len
     return -1;
 }
 
+/* ─── HTTP POST (büyük gövde) ────────────────────────────────
+   http_post'tan farkı: gövde 1024 bayt ile sınırlı değildir.
+   Başlık tek pakette, gövde ise ≤1000 baytlık parçalar halinde
+   gönderilir (her parça g_tcp_seq'i ilerletir). git push gibi
+   büyük veri yükleyen işlemler için kullanılır. */
+int http_post_port(const char *host, const char *path, const char *data, int data_len,
+                   char *buf, int maxlen, unsigned short port) {
+    unsigned char dest[4];
+    if (!host || !path || !data || data_len < 0 || !buf || maxlen < 2) return -4;
+    if (parse_host(host, dest) != 0) return -1;
+    unsigned short p = port ? port : 80;
+
+    char req[768]; int rl = 0;
+    const char *m = "POST ", *pr = " HTTP/1.1\r\nHost: ";
+    const char *ct = "\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: ";
+    const char *en = "\r\nConnection: close\r\n\r\n";
+    if (strlen(m) + strlen(path) + strlen(pr) + strlen(host) + strlen(ct) + strlen(en) + 16 >= sizeof(req)) return -4;
+    for (const char *q = m; *q; q++) req[rl++] = *q;
+    for (const char *q = path; *q; q++) req[rl++] = *q;
+    for (const char *q = pr; *q; q++) req[rl++] = *q;
+    for (const char *q = host; *q; q++) req[rl++] = *q;
+    for (const char *q = ct; *q; q++) req[rl++] = *q;
+
+    char num[16]; int np = 0;
+    if (data_len == 0) { num[np++] = '0'; }
+    else { char tmp[16]; int t = 0; int n = data_len; while (n > 0) { tmp[t++] = '0' + (n % 10); n /= 10; } for (int i = t-1; i >= 0; i--) num[np++] = tmp[i]; }
+    for (int i = 0; i < np; i++) req[rl++] = num[i];
+    for (const char *q = en; *q; q++) req[rl++] = *q;
+    req[rl] = '\0';
+
+    if (tcp_connect(dest, p) != 0) {
+        if (tcp_auto_reconnect(dest, p) != 0) return -2;
+    }
+
+    for (int attempt = 0; attempt < 3; attempt++) {
+        if (send_tcp_packet(dest, p, TCP_PSH | TCP_ACK, req, rl) != 0) {
+            if (tcp_auto_reconnect(dest, p) != 0) break;
+            continue;
+        }
+        g_tcp_seq += rl;
+
+        /* Gövdeyi ≤1000 baytlık parçalara bölerek gönder */
+        int off = 0, fail = 0;
+        while (off < data_len) {
+            int chunk = data_len - off;
+            if (chunk > 1000) chunk = 1000;
+            if (send_tcp_packet(dest, p, TCP_PSH | TCP_ACK, data + off, chunk) != 0) {
+                fail = 1; break;
+            }
+            g_tcp_seq += chunk;
+            off += chunk;
+        }
+        if (fail) {
+            if (tcp_auto_reconnect(dest, p) != 0) break;
+            continue;
+        }
+
+        int len = tcp_recv_response(buf, maxlen);
+        if (len > 0) {
+            tcp_disconnect(dest, p);
+            return len;
+        }
+        if (len == TCP_RX_TIMEOUT || len == TCP_RX_ERROR || len == TCP_RX_REPAIR) {
+            if (tcp_auto_reconnect(dest, p) != 0) break;
+            continue;
+        }
+        break;
+    }
+    tcp_safe_close();
+    return -1;
+}
+
+/* ─── HTTPS POST ────────────────────────────────────────────── */
+int https_post_port(const char *host, const char *path, const char *data, int data_len,
+                    char *buf, int maxlen, unsigned short port) {
+    unsigned char dest[4];
+    if (!host || !path || !data || data_len < 0 || !buf || maxlen < 2) return -4;
+    if (parse_host(host, dest) != 0) return -1;
+    if (!port) port = 443;
+
+    for (int attempt = 0; attempt < 3; attempt++) {
+        if (tcp_connect(dest, port) != 0) {
+            if (attempt < 2 && tcp_auto_reconnect(dest, port) == 0) {
+                /* connected */
+            } else return -2;
+        }
+        if (tls_session_handshake(host, dest, port) != 0) {
+            if (attempt < 2) { tcp_safe_close(); pit_delay_ms(1000); continue; }
+            return NETWORK_ERR_TLS_VERIFICATION_FAILED;
+        }
+
+        char req[2048]; int rl = 0;
+        const char *m = "POST ", *pr = " HTTP/1.1\r\nHost: ", 
+                   *ct = "\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: ",
+                   *en = "\r\nConnection: close\r\n\r\n";
+        if (strlen(m) + strlen(path) + strlen(pr) + strlen(host) + strlen(ct) + strlen(en) + data_len + 16 >= sizeof(req)) return -4;
+        for (const char *p = m; *p; p++) req[rl++] = *p;
+        for (const char *p = path; *p; p++) req[rl++] = *p;
+        for (const char *p = pr; *p; p++) req[rl++] = *p;
+        for (const char *p = host; *p; p++) req[rl++] = *p;
+        for (const char *p = ct; *p; p++) req[rl++] = *p;
+
+        char num[16]; int np = 0;
+        if (data_len == 0) { num[np++] = '0'; }
+        else { char tmp[16]; int t = 0; int n = data_len; while (n > 0) { tmp[t++] = '0' + (n % 10); n /= 10; } for (int i = t-1; i >= 0; i--) num[np++] = tmp[i]; }
+        for (int i = 0; i < np; i++) req[rl++] = num[i];
+
+        for (const char *p = en; *p; p++) req[rl++] = *p;
+        for (int i = 0; i < data_len; i++) req[rl++] = data[i];
+        req[rl] = '\0';
+
+        if (tls_client_write(&g_tls, (const uint8_t *)req, (size_t)rl) != TLS_OK) {
+            if (attempt < 2) { tcp_safe_close(); pit_delay_ms(1000); continue; }
+            return -1;
+        }
+
+        unsigned char rbuf[2048];
+        char hbuf[2048]; int hlen = 0;
+        int total = 0, header_done = 0;
+        size_t rlen;
+        for (;;) {
+            net_progress();
+            int rc = tls_client_read(&g_tls, rbuf, sizeof rbuf, &rlen);
+            if (rc == TLS_OK && rlen == 0) break;
+            if (rc != TLS_OK) break;
+            if (!header_done) {
+                for (size_t k = 0; k < rlen; k++) {
+                    if (hlen >= (int)sizeof(hbuf)) return -4;
+                    hbuf[hlen++] = (char)rbuf[k];
+                    if (hlen >= 4 && hbuf[hlen-4] == '\r' && hbuf[hlen-3] == '\n' &&
+                        hbuf[hlen-2] == '\r' && hbuf[hlen-1] == '\n') {
+                        for (size_t j = k + 1; j < rlen; j++) {
+                            if (total + 1 >= maxlen) return -4;
+                            buf[total++] = (char)rbuf[j];
+                        }
+                        header_done = 1;
+                        break;
+                    }
+                }
+            } else {
+                if (total + (int)rlen >= maxlen) return -4;
+                for (size_t j = 0; j < rlen; j++) buf[total++] = (char)rbuf[j];
+            }
+        }
+        if (total > 0) {
+            if (total < maxlen) buf[total] = '\0';
+            tcp_disconnect(dest, port);
+            return total;
+        }
+        if (attempt < 2) { tcp_safe_close(); pit_delay_ms(1000); continue; }
+        break;
+    }
+    tcp_safe_close();
+    return -1;
+}
+
+/* ─── Streaming HTTP indirme ──────────────────────────────────
+   tcp_recv_response gibi çalışır ama gövde verisini bir arabellekte
+   biriktirmek yerine `on_chunk` geri çağrısına aktarır. Bu sayede
+   büyük dosyalar sabit bellekle (≈2KB arabellek) indirilebilir.
+   `content_length` -1 ise bilinmiyor; 0 ise sunucu Connection: close
+   ile bitirir. */
+
+static int parse_content_length(const char *header, int header_len) {
+    const char *needle = "Content-Length:";
+    int nlen = 0;
+    while (needle[nlen]) nlen++;
+    for (int i = 0; i + nlen <= header_len; i++) {
+        int match = 1;
+        for (int j = 0; j < nlen; j++) {
+            char h = header[i + j], n = needle[j];
+            if (h >= 'A' && h <= 'Z') h += 32;
+            if (n >= 'A' && n <= 'Z') n += 32;
+            if (h != n) { match = 0; break; }
+        }
+        if (match) {
+            int pos = i + nlen;
+            while (pos < header_len && (header[pos] == ' ' || header[pos] == '\t')) pos++;
+            int val = 0, digits = 0;
+            while (pos < header_len && header[pos] >= '0' && header[pos] <= '9') {
+                val = val * 10 + (header[pos] - '0');
+                digits++;
+                pos++;
+            }
+            if (digits > 0) return val;
+        }
+    }
+    return -1;
+}
+
+static int tcp_recv_response_streaming(http_chunk_cb_t on_chunk, void *ctx,
+                                       int content_length) {
+    static unsigned char rx[1500]; unsigned int rx_len = 0;
+    char header[2048];
+    int header_len = 0;
+    int body_total = 0; int header_done = 0;
+    int rx_fatal = 0;
+    int idle_after_data = 0;
+    int got_fin = 0;
+    int hdr_content_length = -1;
+
+    if (!on_chunk || !g_tcp_connected) return -1;
+
+    for (int i = 0; i < 60000; i++) {
+        net_progress();
+        int drained = 0;
+        for (;;) {
+            rx_len = 0;
+            int rr = raw_recv(rx, &rx_len);
+            if (rr == -1) {
+                if (++rx_fatal >= 5) return TCP_RX_ERROR;
+                break;
+            }
+            if (rr != 0) break;
+            if (rx_len < 54) continue;
+            drained = 1;
+            ip4_hdr_t *rip = (ip4_hdr_t*)(rx + 14);
+            tcp_hdr_t *tcp = (tcp_hdr_t*)(rx + 34);
+            if (!tcp_is_ours(rip, tcp)) {
+                tcp_rst_closed_segment(rip, tcp);
+                continue;
+            }
+            if (tcp->flags & TCP_RST) { g_tcp_rst_received = 1; return TCP_RX_REPAIR; }
+            if (!g_net) return TCP_RX_REPAIR;
+
+            int ip_len = (rip->ver_ihl & 0x0f) * 4;
+            int tcp_len = ((tcp->data_offset >> 4) & 0x0f) * 4;
+            int data_start = 14 + ip_len + tcp_len;
+            if (ip_len < 20 || tcp_len < 20 || data_start > (int)rx_len) continue;
+            int ip_total = __builtin_bswap16(rip->len);
+            int data_len = ip_total - ip_len - tcp_len;
+            if (data_len < 0) data_len = 0;
+            if (data_start + data_len > (int)rx_len) data_len = (int)rx_len - data_start;
+
+            if (data_len > 0 || (tcp->flags & TCP_FIN)) {
+                unsigned int seg_seq = __builtin_bswap32(tcp->seq);
+                int seg_has_fin = (tcp->flags & TCP_FIN) ? 1 : 0;
+                if ((seg_seq + (unsigned int)data_len + (unsigned int)seg_has_fin) <= g_tcp_ack) {
+                    if (tcp_send_ack() != 0) return TCP_RX_REPAIR;
+                    continue;
+                }
+                if (seg_seq != g_tcp_ack) {
+                    if (tcp_send_ack() != 0) return TCP_RX_REPAIR;
+                    continue;
+                }
+            }
+
+            if (!header_done) {
+                for (int k = 0; k < data_len; k++) {
+                    if (header_len >= (int)sizeof(header)) return -4;
+                    header[header_len++] = (char)rx[data_start + k];
+                    if (header_len >= 4 && header[header_len - 4] == '\r' &&
+                        header[header_len - 3] == '\n' && header[header_len - 2] == '\r' &&
+                        header[header_len - 1] == '\n') {
+                        hdr_content_length = parse_content_length(header, header_len);
+                        if (content_length < 0 && hdr_content_length >= 0)
+                            content_length = hdr_content_length;
+                        int body_start = k + 1;
+                        int dlen = data_len - body_start;
+                        if (dlen > 0) {
+                            on_chunk((const char *)(rx + data_start + body_start), dlen, ctx);
+                            body_total += dlen;
+                        }
+                        header_done = 1;
+                        break;
+                    }
+                }
+            } else {
+                if (data_len > 0) {
+                    on_chunk((const char *)(rx + data_start), data_len, ctx);
+                    body_total += data_len;
+                }
+            }
+            if (data_len > 0) g_tcp_ack += data_len;
+            if (tcp->flags & TCP_FIN) { g_tcp_ack++; got_fin = 1; }
+            if (data_len > 0 || got_fin) {
+                if (tcp_send_ack() != 0) return TCP_RX_REPAIR;
+            }
+            if (got_fin) break;
+        }
+        if (drained) { rx_fatal = 0; idle_after_data = 0; continue; }
+        if (body_total > 0) {
+            if (content_length > 0 && body_total >= content_length) break;
+            if (++idle_after_data >= 5000) break;
+            if (g_tcp_dup_count > 0 && (idle_after_data % 200) == 0) {
+                g_tcp_dup_count = 0;
+                tcp_send_ack();
+            }
+        }
+        if (got_fin) break;
+        uefi_stall(1000);
+    }
+    return body_total;
+}
+
+/* Streaming HTTP GET: gövde verisi on_chunk callback'ine aktarılır. */
+int http_get_streaming(const char *host, const char *path,
+                       http_chunk_cb_t on_chunk, void *ctx,
+                       unsigned short port) {
+    unsigned char dest[4];
+    if (!host || !path || !on_chunk) return -1;
+    if (!port) port = 80;
+    if (parse_host(host, dest) != 0) return -1;
+    if (tcp_connect(dest, port) != 0) {
+        if (tcp_auto_reconnect(dest, port) != 0) return -2;
+    }
+
+    char req[512]; int rl = 0;
+    const char *m = "GET ", *pr = " HTTP/1.1\r\nHost: ", *en = "\r\nConnection: close\r\n\r\n";
+    if (strlen(m) + strlen(path) + strlen(pr) + strlen(host) + strlen(en) >= sizeof(req)) {
+        tcp_disconnect(dest, port); return -4;
+    }
+    for (const char *p = m; *p; p++) req[rl++] = *p;
+    for (const char *p = path; *p; p++) req[rl++] = *p;
+    for (const char *p = pr; *p; p++) req[rl++] = *p;
+    for (const char *p = host; *p; p++) req[rl++] = *p;
+    for (const char *p = en; *p; p++) req[rl++] = *p;
+    req[rl] = '\0';
+
+    for (int attempt = 0; attempt < 3; attempt++) {
+        if (send_tcp_packet(dest, port, TCP_PSH | TCP_ACK, req, rl) != 0) {
+            if (tcp_auto_reconnect(dest, port) != 0) break;
+            continue;
+        }
+        g_tcp_seq += rl;
+
+        /* Önce küçük bir arabellekte başlık oku, Content-Length al */
+        int total = tcp_recv_response_streaming(on_chunk, ctx, -1);
+        tcp_disconnect(dest, port);
+        if (total > 0) return total;
+        if (total == TCP_RX_TIMEOUT || total == TCP_RX_ERROR || total == TCP_RX_REPAIR) {
+            if (tcp_auto_reconnect(dest, port) != 0) break;
+            continue;
+        }
+        break;
+    }
+    tcp_safe_close();
+    return -1;
+}
+
 int wget(const char *host, const char *http_path, const char *save_path, char *buf, int maxlen) {
     int len = http_get(host, http_path, buf, maxlen);
     if (len <= 0) return len;
@@ -1931,7 +2346,7 @@ static int network_probe_gateway(void) {
     }
     return -1;
 }
-
+ 
 int network_force_repair(void) {
     NETWORK_DEBUG_LOG(L"[NET] Otomatik onarım başlıyor\r\n");
     g_gateway_mac_valid = 0;
@@ -1959,6 +2374,8 @@ int network_health_status(void) {
 int network_repair_count(void) { return g_net_repair_count; }
 
 void network_monitor_tick(void) {
+    if (g_tty_mode) return;  /* TTY modunda ağ izlemesini atla */
+
     if (g_net_reinit_cooldown > 0) {
         g_net_reinit_cooldown--;
         return;
@@ -2021,4 +2438,22 @@ void network_monitor_tick(void) {
             network_force_repair();
         }
     }
+}
+
+/* TTY mode kontrolü */
+void tty_mode_set(int enabled) {
+    g_tty_mode = enabled ? 1 : 0;
+}
+
+int tty_mode_get(void) {
+    return g_tty_mode;
+}
+
+/* ---- TLS alert helper ---- */
+
+int tls_client_last_alert(tls_client_t *c, uint8_t *level, uint8_t *desc) {
+    if (!c) return -1;
+    *level = c->last_alert_level;
+    *desc = c->last_alert_desc;
+    return 0;
 }

@@ -13,6 +13,7 @@
 #include "../include/keyboard.h"
 #include "../include/session.h"
 #include "../include/network.h"
+#include "../include/time.h"
 #include <efi.h>
 
 shell_control    g_shell;
@@ -387,6 +388,8 @@ static void print_shell_prompt(void) {
 int main_get_input(char *buffer, int max_len) {
     int pos = splits[active_split].cmd_pos;
 
+    tty_mode_set(1);  /* TTY moduna gir: ağ izlemesini devre dışı bırak */
+
     while (1) {
         char ch = try_read_key();
         if (ch == 0) {
@@ -420,6 +423,7 @@ int main_get_input(char *buffer, int max_len) {
             } else {
                 active_split = (active_split + 1) % 2;
             }
+            tty_mode_set(0);  /* TTY modundan cik: ag izlemesini etkinlestir */
             return -2;
         }
 
@@ -436,6 +440,7 @@ int main_get_input(char *buffer, int max_len) {
                 splits[0].cmd_buf[0] = '\0';
                 splits[0].needs_prompt = 1;
             }
+            tty_mode_set(0);  /* TTY modundan cik: ag izlemesini etkinlestir */
             return -2;
         }
 
@@ -444,6 +449,7 @@ int main_get_input(char *buffer, int max_len) {
             buffer[pos] = '\0';
             splits[active_split].cmd_pos = 0;
             next_line();
+            tty_mode_set(0);  /* TTY modundan cik: ag izlemesini etkinlestir */
             return pos;
         }
 
@@ -491,6 +497,14 @@ void kernel_main(gop_info_t *gop_info, void *mem_base) {
         if (st && st->BootServices)
             st->BootServices->SetWatchdogTimer(0, 0, 0, NULL);
     }
+
+    /* UEFI RTC (gercek zamanli saat) baslat */
+    {
+        EFI_SYSTEM_TABLE *st = (EFI_SYSTEM_TABLE*)io_get_system_table();
+        if (st && st->RuntimeServices)
+            time_uefi_init(st->RuntimeServices);
+    }
+    dbg_print("[KRN] time_uefi_init done\n");
 
     /* Video başlat — GOP frame buffer */
     video_init(gop_info);
