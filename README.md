@@ -148,11 +148,12 @@ make
 # 2) Framebuffer fontunu üret
 python3 gen_font.py
 
-# 3) UEFI çalıştırılabilir dosyasını (BOOTX64.EFI) üret
+# 3) MicroPython nesnelerini derle (hataları filtrelemek için)
+make $(find src/micropython_embed -name "*.c" | sed 's/\.c$/.o/') 2>&1 | grep "error:" | head -10
+
+# 4) UEFI çalıştırılabilir dosyasını (BOOTX64.EFI) üret
 make BOOTX64.EFI
 
-# 4) MicroPython nesnelerini derle (hataları filtrelemek için)
-make $(find src/micropython_embed -name "*.c" | sed 's/\.c$/.o/') 2>&1 | grep "error:" | head -10
 ```
 
 > 💡 **İpucu:** Derleme hedefi `x86_64-unknown-windows` PE/COFF ABI'sini kullanır (UEFI'nin gerektirdiği format), bu yüzden `clang` + `lld-link` kombinasyonu gereklidir; klasik ELF toolchain'i burada işe yaramaz.
